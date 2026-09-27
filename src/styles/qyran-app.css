@@ -1,0 +1,357 @@
+/* Shared Qyran app chrome — used by all internal pages.
+ * Scoped under .qyran-app
+ */
+
+
+.qyran-app {
+  /* Цвета живут в tokens.css и переключаются по data-theme на <html>.
+     Здесь остаётся только то, что к теме отношения не имеет. */
+
+  position: relative;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+.qyran-app *,
+.qyran-app *::before,
+.qyran-app *::after { box-sizing: border-box; }
+
+.qyran-app::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(1200px 600px at 80% -10%, var(--glow-a), transparent 60%),
+    radial-gradient(900px 500px at 10% 30%, var(--glow-b), transparent 60%);
+}
+
+.qyran-app .mono { font-family: 'Geist Mono', ui-monospace, monospace; }
+.qyran-app .eyebrow {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px; font-weight: 500; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-mute);
+}
+.qyran-app .dim { color: var(--text-dim); }
+.qyran-app .mute { color: var(--text-mute); }
+.qyran-app .grad-text {
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.qyran-app .shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+.qyran-app .shell-narrow {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+
+/* Top bar */
+.qyran-app .topbar {
+  position: sticky; top: 0; z-index: 30;
+  backdrop-filter: blur(14px);
+  background: var(--bar);
+  border-bottom: 1px solid var(--border-soft);
+  height: 64px;
+  display: flex; align-items: center;
+}
+.qyran-app .topbar-inner { display: flex; align-items: center; gap: 16px; width: 100%; }
+.qyran-app .brand-q {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: var(--grad-brand);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--on-brand); font-weight: 700; font-size: 15px;
+}
+.qyran-app .iconbtn {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: border-color .2s, color .2s, background .2s;
+  font-family: inherit;
+}
+.qyran-app .iconbtn:hover { border-color: var(--accent-line); color: var(--text); background: var(--surface); }
+.qyran-app .iconbtn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.qyran-app .title-row { display: flex; align-items: baseline; gap: 12px; }
+.qyran-app .page-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+.qyran-app .page-sub { font-size: 13px; color: var(--text-mute); }
+.qyran-app .spacer { flex: 1; }
+
+.qyran-app .pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  font-size: 13px; color: var(--text-dim);
+}
+.qyran-app .pill .dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--gold); box-shadow: 0 0 10px var(--gold);
+}
+.qyran-app .pill.alive .dot {
+  background: var(--amber); box-shadow: 0 0 10px var(--amber);
+  animation: qa-pulse 1.6s ease-in-out infinite;
+}
+@keyframes qa-pulse { 50% { opacity: .4; } }
+
+/* Page header */
+.qyran-app .page-header { padding: 56px 0 28px; }
+.qyran-app .page-h1 {
+  font-weight: 600;
+  font-size: clamp(36px, 4vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+  margin: 0 0 14px;
+  text-wrap: balance;
+  color: var(--text);
+}
+.qyran-app .page-lede {
+  color: var(--text-dim);
+  font-size: 17px;
+  line-height: 1.55;
+  max-width: 640px;
+  margin: 0;
+}
+
+/* Cards / panels */
+.qyran-app .card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 24px;
+}
+.qyran-app .card-elev {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.qyran-app .panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 22px;
+}
+.qyran-app .panel + .panel { margin-top: 16px; }
+.qyran-app .panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.qyran-app .panel-h {
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+  display: flex; align-items: center; gap: 10px;
+}
+.qyran-app .panel-h .num {
+  font-family: 'Geist Mono', monospace; font-size: 11px;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-mute);
+}
+
+/* Buttons */
+.qyran-app .btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 20px;
+  border-radius: var(--r-btn);
+  font-family: inherit; font-weight: 500; font-size: 14px;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform .15s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease, opacity .2s ease;
+}
+.qyran-app .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.qyran-app .btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.qyran-app .btn-primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.qyran-app .btn-primary:hover:not(:disabled) { background: var(--text); transform: translateY(-1px); }
+.qyran-app .btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+.qyran-app .btn-ghost:hover:not(:disabled) { border-color: var(--accent-line); background: var(--bg-elev); }
+.qyran-app .btn-brand {
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  border: none;
+  font-weight: 600;
+}
+.qyran-app .btn-brand:hover:not(:disabled) { box-shadow: 0 0 50px -10px var(--glow-a); transform: translateY(-1px); }
+.qyran-app .btn-danger {
+  background: rgba(239,68,68,.12);
+  color: var(--danger);
+  border-color: rgba(239,68,68,.3);
+}
+.qyran-app .btn-danger:hover:not(:disabled) { background: rgba(239,68,68,.2); border-color: rgba(239,68,68,.5); }
+
+/* Form inputs */
+.qyran-app .input-row {
+  display: flex; align-items: stretch; gap: 10px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 12px; padding: 6px 6px 6px 14px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.qyran-app .input-row:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.qyran-app .input-row.error {
+  border-color: rgba(239,68,68,.5);
+  box-shadow: 0 0 0 3px rgba(239,68,68,.1);
+}
+.qyran-app .input-row input {
+  flex: 1; background: transparent; border: 0; outline: none;
+  color: var(--text); font: inherit; font-size: 15px;
+  padding: 12px 0;
+}
+.qyran-app .input-row input::placeholder { color: var(--text-mute); }
+.qyran-app .input-icon {
+  display: inline-flex; align-items: center; color: var(--text-mute);
+}
+
+.qyran-app .field-label {
+  display: block;
+  font-size: 13px; font-weight: 500;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+/* Alerts */
+.qyran-app .alert {
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 14px;
+  color: var(--text);
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.qyran-app .alert-error {
+  background: rgba(239,68,68,.08);
+  border-color: rgba(239,68,68,.3);
+  color: var(--danger);
+}
+.qyran-app .alert-success {
+  background: rgba(34,197,94,.08);
+  border-color: rgba(34,197,94,.3);
+  color: var(--ok);
+}
+
+/* Avatar circle */
+.qyran-app .avatar-pill {
+  width: 64px; height: 64px;
+  border-radius: 999px;
+  background: var(--grad-brand);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 24px;
+  color: var(--on-brand);
+  letter-spacing: -0.02em;
+}
+
+/* Tag / chip */
+.qyran-app .tag {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.qyran-app .tag.amber { color: var(--amber); border-color: var(--accent-line); background: var(--accent-soft); }
+.qyran-app .tag.gold { color: var(--gold); border-color: var(--glow-b); background: var(--warm-soft); }
+
+/* Detail page hero gradient overlay */
+.qyran-app .detail-hero {
+  padding: 80px 0 40px;
+  position: relative;
+}
+.qyran-app .detail-hero .hero-icon {
+  width: 64px; height: 64px;
+  border-radius: 16px;
+  background: var(--grad-brand);
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 24px;
+  color: var(--on-brand);
+}
+
+/* Stat blocks */
+.qyran-app .stat-num {
+  font-weight: 600;
+  font-size: clamp(36px, 3.4vw, 48px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-feature-settings: 'tnum';
+}
+
+/* Code block */
+.qyran-app .code-block {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 20px;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.qyran-app a:focus-visible,
+.qyran-app button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .qyran-app *, .qyran-app *::before, .qyran-app *::after { animation: none !important; transition: none !important; }
+}
+
+/*
+ * Шапка на узком экране.
+ *
+ * В неё добавились переключатели темы и языка, и на ноутбучной ширине строка
+ * перестала помещаться: заголовок наезжал на статус. Порядок ужимания такой —
+ * сначала прячется подпись под названием, потом само название, и только в
+ * последнюю очередь текст статуса. Кнопки не прячем никогда: они и есть
+ * управление.
+ */
+.qyran-translator .topbar-inner,
+.qyran-app .topbar-inner { min-width: 0; gap: 10px; }
+.qyran-translator .topbar-inner > *,
+.qyran-app .topbar-inner > * { flex: 0 0 auto; }
+.qyran-translator .title-row,
+.qyran-app .title-row { min-width: 0; }
+.qyran-translator .page-title,
+.qyran-app .page-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 1100px) {
+  .qyran-translator .page-sub,
+  .qyran-app .page-sub { display: none; }
+}
+@media (max-width: 900px) {
+  .qyran-translator .pill span:not(.dot),
+  .qyran-app .pill span:not(.dot) { display: none; }
+}
+@media (max-width: 720px) {
+  .qyran-translator .page-title,
+  .qyran-app .page-title { display: none; }
+}

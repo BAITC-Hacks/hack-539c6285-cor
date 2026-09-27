@@ -1,0 +1,8 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+/* Токены цвета идут ПОСЛЕ theme.css и ДО остальных: следующие файлы их читают. */
+@import './tokens.css';
+@import './landing.css';
+@import './qyran-app.css';
+@import './translator.css';

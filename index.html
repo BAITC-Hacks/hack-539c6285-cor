@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Qyran - AI Sign Language Translator</title>
+    <!-- Цвет строки браузера подстраивается под тему -->
+    <meta name="theme-color" content="#0B1519" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F7F3E9" media="(prefers-color-scheme: light)" />
+    <script>
+      /*
+       * Тема ставится ДО отрисовки, иначе страница успевает мигнуть чужим
+       * фоном: сначала тёмным, а через кадр становится светлой. Скрипт
+       * намеренно встроен в разметку и без модулей — он обязан отработать
+       * раньше, чем загрузится приложение.
+       *
+       * Логика та же, что в src/app/context/ThemeContext.tsx: явный выбор
+       * важнее системной настройки.
+       */
+      (function () {
+        try {
+          var saved = localStorage.getItem('qyran-theme');
+          var theme = saved === 'light' || saved === 'dark'
+            ? saved
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+          document.documentElement.setAttribute('data-theme', theme);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

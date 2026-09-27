@@ -1,0 +1,14 @@
+node_modules
+.git
+ml
+dist
+*.zip
+.DS_Store
+
+# local tooling / agent scratch — never part of the deployed site
+.claude
+.vscode
+.mcp.json
+scripts
+*.sh
+*.bak

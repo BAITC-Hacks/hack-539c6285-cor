@@ -1,0 +1,37 @@
+node_modules
+dist
+.vercel
+.env
+.env.local
+*.log
+*.zip
+*.bak
+.DS_Store
+.claude/
+.vscode/
+# Конфиг MCP держит ключи — в репозиторий не отправляем
+.mcp.json
+
+# Веса и файлы моделей и 3D-аватар в этот репозиторий не кладём (решение команды)
+public/model/
+*.glb
+*.gltf
+*.fbx
+*.blend
+*.vrm
+*.bin
+*.h5
+*.keras
+*.onnx
+*.pt
+*.pth
+*.tflite
+*.task
+
+# Данные и окружение обучения
+ml/venv/
+ml/data/
+ml/**/checkpoints/
+*.npy
+*.npz
+*.pkl

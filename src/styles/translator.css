@@ -1,0 +1,443 @@
+/* Qyran translator page — scoped under .qyran-translator */
+
+
+.qyran-translator {
+  /* Цвета живут в tokens.css и переключаются по data-theme на <html>. */
+
+  position: relative;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+.qyran-translator *,
+.qyran-translator *::before,
+.qyran-translator *::after { box-sizing: border-box; }
+
+.qyran-translator::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(1200px 600px at 80% -10%, var(--glow-a), transparent 60%),
+    radial-gradient(900px 500px at 10% 30%, var(--glow-b), transparent 60%);
+}
+
+.qyran-translator .mono { font-family: 'Geist Mono', ui-monospace, monospace; }
+.qyran-translator .eyebrow {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px; font-weight: 500; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-mute);
+}
+.qyran-translator .dim { color: var(--text-dim); }
+.qyran-translator .mute { color: var(--text-mute); }
+.qyran-translator .grad-text {
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.qyran-translator .shell {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+
+/* Top bar */
+.qyran-translator .topbar {
+  position: sticky; top: 0; z-index: 30;
+  backdrop-filter: blur(14px);
+  background: var(--bar);
+  border-bottom: 1px solid var(--border-soft);
+  height: 64px;
+  display: flex; align-items: center;
+}
+.qyran-translator .topbar-inner { display: flex; align-items: center; gap: 16px; width: 100%; }
+.qyran-translator .brand-q {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: var(--grad-brand);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--on-brand); font-weight: 700; font-size: 15px;
+}
+.qyran-translator .iconbtn {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: border-color .2s, color .2s, background .2s;
+  font-family: inherit;
+}
+.qyran-translator .iconbtn:hover { border-color: var(--accent-line); color: var(--text); background: var(--surface); }
+.qyran-translator .iconbtn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.qyran-translator .title-row { display: flex; align-items: baseline; gap: 12px; }
+.qyran-translator .page-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.qyran-translator .page-sub { font-size: 13px; color: var(--text-mute); }
+.qyran-translator .spacer { flex: 1; }
+
+.qyran-translator .pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  font-size: 13px; color: var(--text-dim);
+}
+.qyran-translator .pill .dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--gold); box-shadow: 0 0 10px var(--gold);
+}
+
+/* Page header */
+.qyran-translator .page-header { padding: 56px 0 28px; }
+.qyran-translator .page-h1 {
+  font-weight: 600;
+  font-size: clamp(36px, 4vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+  margin: 0 0 14px;
+  text-wrap: balance;
+}
+.qyran-translator .page-lede {
+  color: var(--text-dim);
+  font-size: 17px;
+  line-height: 1.55;
+  max-width: 640px;
+  margin: 0;
+}
+
+/* Main grid */
+.qyran-translator .grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 24px;
+  margin: 32px 0 80px;
+}
+@media (max-width: 960px) { .qyran-translator .grid { grid-template-columns: 1fr; } }
+
+/* Avatar stage */
+.qyran-translator .stage {
+  position: relative;
+  aspect-ratio: 4/5;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  box-shadow: 0 30px 80px -30px rgba(0,0,0,.7);
+}
+.qyran-translator .stage-head {
+  position: absolute; top: 14px; left: 14px; right: 14px;
+  display: flex; justify-content: space-between; align-items: center;
+  z-index: 3; pointer-events: none;
+}
+.qyran-translator .stage-tag {
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px; letter-spacing: 0.1em;
+  padding: 5px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-dim);
+  pointer-events: auto;
+}
+.qyran-translator .stage-floor {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 30%;
+  background: radial-gradient(60% 60% at 50% 100%, var(--accent-soft), transparent 70%);
+  pointer-events: none; z-index: 1;
+}
+.qyran-translator .stage-grid {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(168,160,150,.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(168,160,150,.04) 1px, transparent 1px);
+  background-size: 32px 32px;
+  -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, #000 30%, transparent 80%);
+  mask-image: radial-gradient(ellipse 80% 70% at 50% 50%, #000 30%, transparent 80%);
+}
+.qyran-translator .avatar-wrap {
+  position: absolute; inset: 0;
+  z-index: 2;
+}
+
+.qyran-translator .stage-corners span {
+  position: absolute; width: 16px; height: 16px;
+  border: 1.5px solid var(--warm-line);
+  z-index: 3; pointer-events: none;
+}
+.qyran-translator .stage-corners .tl { top: 14px; left: 14px; border-right: 0; border-bottom: 0; border-top-left-radius: 4px; }
+.qyran-translator .stage-corners .tr { top: 14px; right: 14px; border-left: 0; border-bottom: 0; border-top-right-radius: 4px; }
+.qyran-translator .stage-corners .bl { bottom: 14px; left: 14px; border-right: 0; border-top: 0; border-bottom-left-radius: 4px; }
+.qyran-translator .stage-corners .br { bottom: 14px; right: 14px; border-left: 0; border-top: 0; border-bottom-right-radius: 4px; }
+
+.qyran-translator .stage-status {
+  position: absolute; bottom: 14px; left: 14px; right: 14px;
+  display: flex; gap: 8px; z-index: 3; pointer-events: none;
+  flex-wrap: wrap;
+}
+.qyran-translator .stage-chip {
+  font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: 0.1em;
+  padding: 5px 9px; border-radius: 6px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.qyran-translator .stage-chip.ok {
+  color: var(--gold); border-color: var(--glow-b); background: var(--warm-soft);
+}
+.qyran-translator .stage-chip.live {
+  color: var(--amber); border-color: var(--accent-line); background: var(--accent-soft);
+}
+
+.qyran-translator .stage-loading {
+  position: absolute; inset: 0; z-index: 4;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px;
+  background: var(--bar);
+}
+.qyran-translator .spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--accent-soft);
+  border-top-color: var(--amber);
+  border-radius: 999px;
+  animation: qyran-spin 0.9s linear infinite;
+}
+@keyframes qyran-spin { to { transform: rotate(360deg); } }
+
+/* Right column panels */
+.qyran-translator .panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 22px;
+}
+.qyran-translator .panel + .panel { margin-top: 16px; }
+.qyran-translator .panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.qyran-translator .panel-h {
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+  display: flex; align-items: center; gap: 10px;
+}
+.qyran-translator .panel-h .num {
+  font-family: 'Geist Mono', monospace; font-size: 11px;
+  width: 22px; height: 22px; border-radius: 6px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-mute);
+}
+
+/* Input row */
+.qyran-translator .input-row {
+  display: flex; align-items: stretch; gap: 10px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 12px; padding: 6px 6px 6px 14px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.qyran-translator .input-row:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.qyran-translator .input-row input {
+  flex: 1; background: transparent; border: 0; outline: none;
+  color: var(--text); font: inherit; font-size: 15px;
+  padding: 12px 0;
+}
+.qyran-translator .input-row input::placeholder { color: var(--text-mute); }
+
+/* Speed seg */
+.qyran-translator .speed-row { display: flex; align-items: center; gap: 14px; margin-top: 14px; flex-wrap: wrap; }
+.qyran-translator .speed-label { font-size: 13px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
+.qyran-translator .seg {
+  display: inline-flex;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px;
+}
+.qyran-translator .seg button {
+  font-family: 'Geist Mono', monospace; font-size: 12px; font-weight: 500;
+  padding: 7px 14px; border-radius: 999px; border: 0;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+  transition: color .2s, background .2s;
+}
+.qyran-translator .seg button:hover { color: var(--text); }
+.qyran-translator .seg button.on {
+  background: var(--grad-brand);
+  color: var(--on-brand);
+}
+
+.qyran-translator .slider {
+  flex: 1; min-width: 140px; appearance: none;
+  height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--amber) 0%, var(--amber) var(--v, 50%), var(--border) var(--v, 50%), var(--border) 100%);
+  outline: none; cursor: pointer;
+}
+.qyran-translator .slider::-webkit-slider-thumb {
+  appearance: none; width: 16px; height: 16px; border-radius: 999px;
+  background: var(--text); border: 2px solid var(--amber);
+  cursor: pointer;
+}
+.qyran-translator .slider::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 999px;
+  background: var(--text); border: 2px solid var(--amber); cursor: pointer;
+}
+
+/* Textarea */
+.qyran-translator .textarea-wrap {
+  position: relative;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px;
+  transition: border-color .2s, box-shadow .2s;
+}
+.qyran-translator .textarea-wrap:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.qyran-translator .textarea-wrap textarea {
+  width: 100%; background: transparent; border: 0; outline: none;
+  color: var(--text); font: inherit; font-size: 15px; line-height: 1.55;
+  resize: vertical; min-height: 110px;
+}
+.qyran-translator .textarea-wrap textarea::placeholder { color: var(--text-mute); }
+.qyran-translator .textarea-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 8px; font-family: 'Geist Mono', monospace; font-size: 11px;
+  color: var(--text-mute);
+}
+.qyran-translator .lang-tabs { display: inline-flex; gap: 4px; }
+.qyran-translator .lang-tabs button {
+  font-family: 'Geist Mono', monospace; font-size: 11px;
+  padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-mute); cursor: pointer;
+}
+.qyran-translator .lang-tabs button.on {
+  color: var(--text); background: var(--surface); border-color: var(--border);
+}
+
+/* Big translate */
+.qyran-translator .action-row { display: flex; gap: 10px; align-items: stretch; margin-top: 14px; }
+.qyran-translator .btn-translate {
+  flex: 1;
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  border: 0; border-radius: 12px;
+  font: inherit; font-weight: 600; font-size: 15px;
+  padding: 16px 22px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  cursor: pointer;
+  transition: box-shadow .2s, transform .15s, opacity .2s;
+}
+.qyran-translator .btn-translate:hover:not(:disabled) {
+  box-shadow: 0 0 50px -10px var(--glow-a);
+  transform: translateY(-1px);
+}
+.qyran-translator .btn-translate:disabled { opacity: 0.5; cursor: not-allowed; }
+.qyran-translator .btn-translate:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+.qyran-translator .btn-mic {
+  width: 56px; height: 56px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text-dim); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: inherit;
+}
+.qyran-translator .btn-mic:hover { color: var(--amber); border-color: var(--accent-line); }
+.qyran-translator .btn-mic.rec {
+  background: var(--accent-soft);
+  color: var(--amber);
+  border-color: var(--accent-line);
+  animation: qyran-pulse 1.5s ease-in-out infinite;
+}
+@keyframes qyran-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-line); }
+  50% { box-shadow: 0 0 0 8px transparent; }
+}
+
+/* Suggestions */
+.qyran-translator .suggestions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+.qyran-translator .chip {
+  font: inherit; font-size: 13px; padding: 8px 14px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 999px; color: var(--text-dim); cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+.qyran-translator .chip:hover { color: var(--text); border-color: var(--accent-line); }
+
+/* Status row under stage */
+.qyran-translator .row-status {
+  display: flex; align-items: center; gap: 14px;
+  margin-top: 16px; padding: 12px 14px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.qyran-translator .led {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--gold); box-shadow: 0 0 10px var(--gold);
+  animation: qyran-led 2s ease-in-out infinite;
+}
+.qyran-translator .led.playing { background: var(--amber); box-shadow: 0 0 12px var(--amber); }
+@keyframes qyran-led { 50% { opacity: .4; } }
+.qyran-translator .row-status span { font-size: 13px; }
+.qyran-translator .kbd {
+  font-family: 'Geist Mono', monospace;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
+/* Progress under sign */
+.qyran-translator .progress {
+  height: 4px;
+  background: var(--bg-elev);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+.qyran-translator .progress > div {
+  height: 100%;
+  background: var(--grad-brand);
+  border-radius: 999px;
+  transition: width 0.15s ease;
+}
+
+.qyran-translator a:focus-visible,
+.qyran-translator button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .qyran-translator *, .qyran-translator *::before, .qyran-translator *::after { animation: none !important; transition: none !important; }
+}
+
+/*
+ * Шапка на узком экране.
+ *
+ * В неё добавились переключатели темы и языка, и на ноутбучной ширине строка
+ * перестала помещаться: заголовок наезжал на статус. Порядок ужимания такой —
+ * сначала прячется подпись под названием, потом само название, и только в
+ * последнюю очередь текст статуса. Кнопки не прячем никогда: они и есть
+ * управление.
+ */
+.qyran-translator .topbar-inner,
+.qyran-app .topbar-inner { min-width: 0; gap: 10px; }
+.qyran-translator .topbar-inner > *,
+.qyran-app .topbar-inner > * { flex: 0 0 auto; }
+.qyran-translator .title-row,
+.qyran-app .title-row { min-width: 0; }
+.qyran-translator .page-title,
+.qyran-app .page-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 1100px) {
+  .qyran-translator .page-sub,
+  .qyran-app .page-sub { display: none; }
+}
+@media (max-width: 900px) {
+  .qyran-translator .pill span:not(.dot),
+  .qyran-app .pill span:not(.dot) { display: none; }
+}
+@media (max-width: 720px) {
+  .qyran-translator .page-title,
+  .qyran-app .page-title { display: none; }
+}

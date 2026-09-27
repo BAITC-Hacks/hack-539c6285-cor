@@ -1,0 +1,270 @@
+/* Qyran landing — design tokens & primitives. Scoped to .qyran-landing root. */
+
+
+.qyran-landing {
+  /* Цвета живут в tokens.css и переключаются по data-theme на <html>.
+     Здесь остаётся только то, что к теме отношения не имеет. */
+  --maxw: 1240px;
+  --gutter: 32px;
+  --density: 1;
+
+  position: relative;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+.qyran-landing *,
+.qyran-landing *::before,
+.qyran-landing *::after { box-sizing: border-box; }
+
+.qyran-landing::before {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(1200px 600px at 80% -10%, var(--glow-a), transparent 60%),
+    radial-gradient(900px 500px at 10% 30%, var(--glow-b), transparent 60%);
+}
+
+.qyran-landing main,
+.qyran-landing header,
+.qyran-landing footer,
+.qyran-landing section { position: relative; z-index: 1; }
+
+/* Type */
+.qyran-landing .h-display {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: clamp(48px, 7.4vw, 96px);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.qyran-landing .h1 {
+  font-weight: 600;
+  font-size: clamp(36px, 4.6vw, 64px);
+  line-height: 1.04;
+  letter-spacing: -0.028em;
+  text-wrap: balance;
+}
+.qyran-landing .h2 {
+  font-weight: 600;
+  font-size: clamp(24px, 2.4vw, 32px);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+.qyran-landing .h3 {
+  font-weight: 500;
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+}
+.qyran-landing .eyebrow {
+  font-family: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+}
+.qyran-landing .mono { font-family: 'Geist Mono', ui-monospace, 'SF Mono', monospace; font-feature-settings: 'tnum', 'zero'; }
+.qyran-landing .dim { color: var(--text-dim); }
+.qyran-landing .mute { color: var(--text-mute); }
+
+.qyran-landing .grad-text {
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Layout */
+.qyran-landing .container { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--gutter); }
+.qyran-landing .section { padding: calc(120px * var(--density)) 0; }
+.qyran-landing .section-tight { padding: calc(80px * var(--density)) 0; }
+
+/* Buttons */
+.qyran-landing .btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 22px;
+  border-radius: var(--r-btn);
+  font-family: inherit; font-weight: 500; font-size: 15px; line-height: 1;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: transform .15s ease, background .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.qyran-landing .btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+.qyran-landing .btn-primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.qyran-landing .btn-primary:hover { background: var(--text); transform: translateY(-1px); }
+.qyran-landing .btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+.qyran-landing .btn-ghost:hover { border-color: var(--border); background: var(--bg-elev); }
+.qyran-landing .btn-brand {
+  background: var(--grad-brand);
+  color: var(--on-brand);
+  border: none;
+  font-weight: 600;
+}
+.qyran-landing .btn-brand:hover { box-shadow: var(--shadow-glow); transform: translateY(-1px); }
+
+/* Card */
+.qyran-landing .card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: 28px;
+}
+.qyran-landing .card-elev {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+/* Pill */
+.qyran-landing .pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.qyran-landing .pill .dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--gold);
+  box-shadow: 0 0 10px var(--gold);
+}
+
+.qyran-landing a:focus-visible,
+.qyran-landing button:focus-visible,
+.qyran-landing [role="button"]:focus-visible,
+.qyran-landing input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.qyran-landing ::selection { background: var(--accent-line); color: var(--text); }
+
+/* Hero demo */
+.qyran-landing .demo-stage {
+  position: relative;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.qyran-landing .demo-stage .scanline {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  opacity: .55;
+  animation: qyran-scan 3.6s ease-in-out infinite;
+}
+@keyframes qyran-scan {
+  0%, 100% { top: 12%; opacity: .25; }
+  50%      { top: 88%; opacity: .9; }
+}
+@keyframes qyran-blink { 50% { opacity: 0; } }
+
+/* Bento */
+.qyran-landing .bento {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+}
+.qyran-landing .bento > * { min-width: 0; }
+.qyran-landing .bento .b-3 { grid-column: span 3; }
+.qyran-landing .bento .b-2 { grid-column: span 2; }
+.qyran-landing .bento .b-4 { grid-column: span 4; }
+.qyran-landing .bento .b-6 { grid-column: span 6; }
+@media (max-width: 900px) {
+  .qyran-landing .bento { grid-template-columns: repeat(2, 1fr); }
+  .qyran-landing .bento > * { grid-column: span 2 !important; }
+}
+
+/* Hand pose */
+.qyran-landing .hand-pose { position: relative; aspect-ratio: 4/3; width: 100%; }
+.qyran-landing .hand-pose svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* utility */
+.qyran-landing .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.qyran-landing .col { display: flex; flex-direction: column; gap: 12px; }
+.qyran-landing .center { display: flex; align-items: center; justify-content: center; }
+.qyran-landing .between { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+
+.qyran-landing .caption-bar {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 16px;
+  background: var(--bar);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex; align-items: center; gap: 12px;
+  font-size: 15px;
+}
+.qyran-landing .caption-bar .cc-tag {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: var(--on-brand);
+  background: var(--gold);
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.qyran-landing .stat-num {
+  font-weight: 600;
+  font-size: clamp(40px, 4.4vw, 56px);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-feature-settings: 'tnum';
+}
+
+.qyran-landing .foot {
+  border-top: 1px solid var(--border);
+  padding: 60px 0 40px;
+}
+.qyran-landing .foot a { color: var(--text-dim); text-decoration: none; }
+.qyran-landing .foot a:hover { color: var(--text); }
+
+/* Responsive helpers */
+@media (max-width: 880px) {
+  .qyran-landing .hero-demo { grid-template-columns: 1fr !important; }
+  .qyran-landing .hero-arrow { transform: rotate(90deg); height: 40px; }
+  .qyran-landing .mission-grid { grid-template-columns: 1fr !important; gap: 32px !important; }
+  .qyran-landing .mission-stats { grid-template-columns: 1fr !important; }
+  .qyran-landing .how-grid { grid-template-columns: 1fr 1fr !important; }
+  .qyran-landing .learn-grid { grid-template-columns: 1fr !important; }
+  .qyran-landing .tech-grid { grid-template-columns: 1fr !important; }
+  .qyran-landing .tech-grid > a { border-right: none !important; border-bottom: 1px solid var(--border) !important; }
+  .qyran-landing .tech-grid > a:last-child { border-bottom: none !important; }
+  .qyran-landing .aud-grid { grid-template-columns: 1fr !important; }
+  .qyran-landing .team-grid { grid-template-columns: 1fr !important; }
+  .qyran-landing .impact-card { grid-template-columns: 1fr !important; padding: 32px !important; }
+  .qyran-landing .foot-grid { grid-template-columns: 1fr 1fr !important; }
+}

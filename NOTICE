@@ -1,0 +1,104 @@
+Qyran — атрибуция сторонних материалов
+======================================
+
+Этот файл перечисляет чужие материалы, использованные в проекте, и то, что
+именно с ними сделано. Он существует, потому что часть содержимого репозитория
+— производный материал, а не собственная работа авторов Qyran.
+
+
+1. SLOVO — Russian Sign Language Dataset
+----------------------------------------
+
+Правообладатель: SaluteDevices (Kapitanov A., Kvanchiani K., Nagaev A.,
+Petrova E.)
+Источник:        https://github.com/hukenovs/slovo
+Лицензия:        вариант Creative Commons Attribution-ShareAlike 4.0
+                 International (CC BY-SA 4.0), см. license/ в репозитории
+                 источника.
+
+Что взято:
+  * видеоданные датасета (20 400 клипов, 1001 класс, 194 жестикулянта) —
+    использованы для извлечения ландмарок и обучения распознавателя;
+  * ландмарки MediaPipe Holistic, полученные из этих видео.
+
+Что изменено:
+  * ландмарки канонизированы в 319-мерное представление (ml/features.py);
+  * на них обучена модель распознавания (ml/train_rsl.py, ml/model_def.py);
+  * 966 клипов ретаргетированы на скелет 3D-аватара и лежат в
+    public/gestures/slovo/*.json — это ПРОИЗВОДНЫЙ материал от SLOVO,
+    полученный преобразованием ml/retarget.py и src/lib/retarget.ts.
+
+Цитирование, как просят авторы:
+
+    @inproceedings{kapitanov2023slovo,
+        title={Slovo: Russian Sign Language Dataset},
+        author={Kapitanov, Alexander and Karina, Kvanchiani and
+                Nagaev, Alexander and Elizaveta, Petrova},
+        booktitle={International Conference on Computer Vision Systems},
+        pages={63--73},
+        year={2023},
+        organization={Springer}
+    }
+
+ОТКРЫТЫЙ ВОПРОС, который авторы Qyran обязаны закрыть до коммерческого
+использования: условие ShareAlike распространяется на производный материал.
+Это значит, что public/gestures/slovo/ и, вероятно, веса модели должны
+распространяться на условиях, совместимых с CC BY-SA 4.0. Юридическая
+проверка не проводилась. До её завершения проект не следует считать
+готовым к закрытому коммерческому распространению.
+
+
+2. Аватар
+---------
+
+public/avatar.glb — 3D-модель: голова сгенерирована Hyper3D Rodin, тело и
+скелет на основе рига Mixamo (Adobe). Условия использования Mixamo и Rodin
+должны быть проверены отдельно перед коммерческим использованием.
+
+Аватар «Елнар» (public/avatar_elnar.glb) — тело MakeHuman со скелетом того же
+рига (52 кости, те же имена). Файлы аватаров (*.glb) в этот репозиторий НЕ
+входят — по решению команды; см. README, раздел «Что не входит в репозиторий».
+
+
+3. Библиотеки
+-------------
+
+Зависимости из package.json распространяются под собственными лицензиями
+(MIT, Apache-2.0 и др.), см. node_modules/*/LICENSE после установки.
+Отдельно отмечены ключевые:
+
+  * MediaPipe Holistic (Google) — Apache-2.0
+  * TensorFlow.js (Google) — Apache-2.0
+  * three.js — MIT
+  * React, Vite — MIT
+
+
+4. SpreadTheSign — эталон проверенных жестов
+--------------------------------------------
+
+Источник: https://www.spreadthesign.com (раздел «русский (Россия)»),
+European Sign Language Centre.
+
+Как используется: записи носителей русского жестового языка — ЭТАЛОН, по
+которому вручную строятся ключевые позы жестов аватара и сверяются кадр в
+кадр (scripts/author-phrases.mjs, scripts/lib/phraseRefs.mjs,
+scripts/check-phrases.mjs). Видео не скачиваются и не хранятся в репозитории:
+разметка MediaPipe снимается во вкладке браузера, открытой на сайте источника
+(scripts/sts-analysis.browser.js), а страница сверки gesture-compare.html
+показывает запись с сайта источника рядом с аватаром. В репозитории остаются
+только числа разметки (положения запястий и углы кисти в кадре) и номера
+записей — у каждого жеста указаны sentence/word и номер видео.
+
+
+5. Что является собственной работой авторов Qyran
+--------------------------------------------------
+
+  * весь код в src/ и scripts/, кроме явно помеченных заимствований;
+  * конвейер обучения и оценки в ml/;
+  * процедурный словарь жестов (src/lib/signWords.ts, src/lib/dactyl.ts);
+  * решатель позы для живого захвата (src/lib/poseSolver.ts);
+  * правила перевода фразы в жестовый порядок (src/lib/glossing.ts);
+  * проверенная библиотека жестов: ключевые позы, IK и сверка с эталоном
+    (scripts/author-phrases.mjs, scripts/lib/*, scripts/check-phrases.mjs),
+    готовые анимации public/gestures/*.json и public/gestures/words/*.json;
+  * экран «Окно ЦОН» (src/app/components/TsonPage.tsx, src/lib/tsonDeck.ts).
