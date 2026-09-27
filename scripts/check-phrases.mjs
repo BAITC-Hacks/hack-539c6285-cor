@@ -137,6 +137,22 @@ for (const [name, refDef] of Object.entries(PHRASE_REFS)) {
   }
   deepFace.gap > -0.002 ? ok(`кисти не входят в лицо (ближе всего ${(deepFace.gap * 1000).toFixed(1)} мм @${deepFace.t.toFixed(2)} с)`)
     : fail(`кисть входит в лицо на ${(-deepFace.gap * 1000).toFixed(1)} мм @${deepFace.t.toFixed(2)} с`);
+  // кисти не проходят друг сквозь друга ни в один момент — у всех знаков, где перед корпусом бывают обе руки (аудит 28.09:
+  // на переходах между ключами касания кисти прорезали друг друга до 2 см, а сверка этого не видела)
+  if (minClear.right !== Infinity && minClear.left !== Infinity) {
+    let deepHands = { gap: Infinity, t: 0 };
+    for (let k = 0; k <= Math.round(dur * 60); k++) {
+      const t = k / 60;
+      applyFrame(rig, sampleGesture(gesture, t));
+      // кисти длиной ~18 см: пальцы навстречу сходятся и при запястьях в 36 см — отсекаем только заведомо далёкие
+      if (wpos(rig.bones.get(ARM.right.hand)).distanceTo(wpos(rig.bones.get(ARM.left.hand))) > 0.45) continue;
+      const g = K.handsGap();
+      if (g < deepHands.gap) deepHands = { gap: g, t };
+    }
+    deepHands.gap > -0.003
+      ? ok(`кисти не проходят друг сквозь друга (ближе всего ${deepHands.gap === Infinity ? '— кисти далеко' : `${(deepHands.gap * 1000).toFixed(1)} мм @${deepHands.t.toFixed(2)} с`})`)
+      : fail(`кисти проходят друг сквозь друга: ${(deepHands.gap * 1000).toFixed(1)} мм @${deepHands.t.toFixed(2)} с`);
+  }
   for (const side of ['right', 'left']) {
     const c = minClear[side] * 100;
     if (c === Infinity) { ok(`${side === 'right' ? 'правая' : 'левая'} рука в покое`); continue; }

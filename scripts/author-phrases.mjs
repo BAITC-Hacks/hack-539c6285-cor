@@ -726,6 +726,36 @@ function keepAbove(rightKey, leftKey) {
  * Левая кисть подводится к правой снизу (по вертикали), пока между ними не останется 3 мм кожа к коже: правая
  * стоит там, где у носителя, а левую под ней MediaPipe не видит — её высота менее надёжна.
  */
+/**
+ * Касание правой и левой по вертикали: правая сдвигается вверх или вниз на наименьшее расстояние (до ±8 см), при котором
+ * зазор между кистями — 3 мм; левая не двигается. Зазор по высоте меняется не монотонно (пальцы одной кисти могут
+ * загибаться перед другой), поэтому ищется ближайшая к исходной высоте точка касания, а не «сверху».
+ */
+function touchNear(rightKey, leftKey, { fromAbove = false } = {}) {
+  const leftPose = keyPose('left', leftKey);
+  const gapAt = (dy) => { applyFrame(rig, frameAt(keyPose('right', { ...rightKey, pos: rightKey.pos.clone().add(V(0, dy, 0)) }), leftPose)); return K.handsGap() - 0.003; };
+  let found = null;
+  // сверху — первое касание при опускании с +8 см (правая ложится на левую, а не подпирает её снизу)
+  if (fromAbove) {
+    let prev = 0.15;
+    for (let dy = 0.15; dy >= -0.08; dy -= 0.002) { if (gapAt(dy) <= 0) { found = [prev, dy]; break; } prev = dy; }
+  }
+  for (let step = 1; step <= 40 && !found && !fromAbove; step++) {
+    for (const sgn of [-1, 1]) {
+      const a = sgn * (step - 1) * 0.002, b = sgn * step * 0.002;
+      const ga = gapAt(a), gb = gapAt(b);
+      if (ga === 0) { found = [a, a]; break; }
+      if (Math.sign(ga) !== Math.sign(gb)) { found = [a, b]; break; }
+    }
+  }
+  if (!found) { applyFrame(rig, {}); throw new Error(`touchNear ${rightKey.t} с: касания в пределах ±8 см нет`); }
+  let [a, b] = found;
+  for (let i = 0; i < 30; i++) { const m = (a + b) / 2; if (Math.sign(gapAt(m)) === Math.sign(gapAt(a))) a = m; else b = m; }
+  const dy = (a + b) / 2;
+  const gap = gapAt(dy) + 0.003;
+  applyFrame(rig, {});
+  return { ...rightKey, pos: rightKey.pos.clone().add(V(0, dy, 0)), gap, dy };
+}
 function meetLeft(rightKey, leftKey) {
   const rightPose = keyPose('right', rightKey);
   const gapAt = (W) => { applyFrame(rig, frameAt(rightPose, keyPose('left', { ...leftKey, pos: W }))); return K.handsGap(); };
@@ -1308,11 +1338,14 @@ function pozhaluysta() {
   // вниз ладони съезжают вместе (1.86–1.94, запястье кисти (−0.09…−0.10, −0.61…−0.73)), затем расходятся в покой;
   // перед грудью глубже — иначе большие пальцы чиркнули бы по свитеру
   const k4 = pray(1.94, [-0.09, -0.72], 'sine', { zMin: 0.65 });
-  const right = [{ t: 0, idle: true }, { t: at(0.94), idle: true }, k1.r, k2.r, k3.r, k4.r, { t: at(2.16), idle: true, ease: 'io' }];
-  const left = [{ t: 0, idle: true }, { t: at(0.94), idle: true }, k1.l, k2.l, k3.l, k4.l, { t: at(2.16), idle: true, ease: 'io' }];
-  const head = [{ t: 0, pitch: 0 }, { t: at(2.16), pitch: 0 }];
+  // аудит 28.09: у носителя ладони опускаются вместе ещё ниже (1.94–1.98 запястья позы на −0.82…−0.97) и расходятся
+  // только к 2.10 с; прежде они расходились сразу после 1.94
+  const k5 = pray(1.99, [-0.10, -0.86], 'sine', { zMin: 0.75 });
+  const right = [{ t: 0, idle: true }, { t: at(0.94), idle: true }, k1.r, k2.r, k3.r, k4.r, k5.r, { t: at(2.18), idle: true, ease: 'io' }];
+  const left = [{ t: 0, idle: true }, { t: at(0.94), idle: true }, k1.l, k2.l, k3.l, k4.l, k5.l, { t: at(2.18), idle: true, ease: 'io' }];
+  const head = [{ t: 0, pitch: 0 }, { t: at(2.18), pitch: 0 }];
   return {
-    name: 'words/pozhaluysta', duration: at(2.18), right, left, head,
+    name: 'words/pozhaluysta', duration: at(2.20), right, left, head,
     description:
       'РЖЯ ПОЖАЛУЙСТА, как у носителя в SpreadTheSign RU word 422 (видео 4138), в его темпе: ладони сложены вместе ' +
       'перед серединой груди, пальцы вверх. Поза решена IK на avatar_elnar.glb (scripts/author-phrases.mjs).',
@@ -1437,13 +1470,16 @@ function glukhoy() {
     { t: at(2.28), pos: m1.pos.clone().lerp(c1.pos, 0.55).add(V(-0.012, 0, 0.05)), fingers: dir(0.15, 0.97, 0.1), palm: dir(0.55, 0.1, -0.8), pole: V(-0.42, -0.88, 0.12), shape: SH.one, ease: 'sine' },
     { ...c1, ease: 'sine' },
     { ...c1, t: at(2.78), ease: 'lin' },
-    { ...refKey('right', at(2.92), [-0.53, -0.08], [-0.80, -0.84], { fingers: dir(-0.2, 0.95, 0.2), palm: dir(0.85, 0.1, 0.5), shape: mixShape(SH.one, SH.rest, 0.3) }), ease: 'sine' },
-    { t: at(3.10), idle: true, ease: 'io' },
+    // аудит 28.09 (разметка 2.74–3.30): от щеки палец уходит медленно и ещё прямой — 2.90 запястье (−0.50, −0.03),
+    // пясть 103°; 2.98 (−0.56, −0.12), палец сгибается; к 3.14–3.22 рука в покое
+    { ...refKey('right', at(2.90), [-0.50, -0.03], [-0.80, -0.84], { fingers: dir(-0.2, 0.97, 0.1), palm: dir(0.9, 0.19, 0.39), shape: mixShape(SH.one, SH.rest, 0.15) }), ease: 'sine' },
+    { ...refKey('right', at(2.98), [-0.56, -0.12], [-0.84, -0.88], { fingers: dir(-0.14, 0.98, 0.17), palm: dir(0.96, 0.09, 0.28), shape: mixShape(SH.one, SH.rest, 0.45) }), ease: 'sine' },
+    { t: at(3.18), idle: true, ease: 'io' },
   ];
-  const left = [{ t: 0, idle: true }, { t: at(3.10), idle: true }];
-  const head = [{ t: 0, pitch: 0 }, { t: at(3.10), pitch: 0 }];
+  const left = [{ t: 0, idle: true }, { t: at(3.18), idle: true }];
+  const head = [{ t: 0, pitch: 0 }, { t: at(3.18), pitch: 0 }];
   return {
-    name: 'words/glukhoy', duration: at(3.12), right, left, head,
+    name: 'words/glukhoy', duration: at(3.20), right, left, head,
     description:
       'РЖЯ ГЛУХОЙ, как у носителя в SpreadTheSign RU word 412 (видео 4047), в его темпе: кончик указательного на нижней ' +
       'губе у правого угла рта, затем палец вертикально прижат к щеке перед ухом. Поза решена IK на avatar_elnar.glb ' +
@@ -1734,6 +1770,8 @@ function dobryiDen() {
     { t: 0, idle: true },
     { t: at(1.04), idle: true },
     ...RK,
+    // аудит 28.09: расходясь к ДЕНЬ, мизинец правой прорезал пальцы левой (−6.1 мм) — сперва правая отрывается вверх
+    { ...RK[4], t: at(1.77), pos: RK[4].pos.clone().add(V(-0.01, 0.035, 0.01)), ease: 'sine' },
     // ДЕНЬ: кисти поднимаются перед лицом (глубже — чтобы не задеть лицо) и расходятся
     r(1.86, [-0.40, 0.16], [-0.82, -0.73], { ...UP_R, palm: dir(0.6, 0, 0.8) }, 'sine', { zMin: 0.6 }),
     r(2.00, [-0.66, 0.42], [-0.87, -0.56], UP_R),
@@ -1747,6 +1785,7 @@ function dobryiDen() {
     { t: 0, idle: true },
     { t: at(1.02), idle: true },
     ...LK,
+    { ...LK[4], t: at(1.77), pos: LK[4].pos.clone().add(V(0.01, -0.01, 0)), ease: 'sine' },
     l(1.86, [0.38, 0.06], [0.78, -0.80], { ...UP_L, palm: dir(-0.6, 0, 0.8) }, 'sine', { zMin: 0.6 }),
     l(2.00, [0.66, 0.43], [0.86, -0.56], UP_L),
     l(2.10, [0.78, 0.38], [0.90, -0.60], UP_L, 'lin'),
@@ -1999,12 +2038,17 @@ function kakTebyaZovut() {
   // указательный — прямо на собеседника (в кадре укорочен); ориентация кисти — как в одобренном ТЫ: при нормали
   // MediaPipe «ладонь к середине» указательный смотрел бы вбок, а не в камеру
   const YOU = { fingers: dir(0.1, 0.62, 0.78), palm: dir(0.3, -0.76, 0.58), shape: SH.pointYou };
+  const r1 = on(0.72, [-0.40, -0.41], L1, 'out'), r3 = on(1.20, [-0.40, -0.42], L3, 'lin');
   const right = [
     { t: 0, idle: true },
     { t: at(0.52), idle: true },
-    on(0.72, [-0.40, -0.41], L1, 'out'),
+    // аудит 28.09: подходя, правая прорезала пальцы ещё поднимающейся левой (−4.9 мм) — подходит сверху
+    { ...r1, t: at(0.64), pos: r1.pos.clone().add(V(0, 0.05, 0.02)), ease: 'io' },
+    { ...r1, ease: 'sine' },
     on(1.10, [-0.40, -0.43], L2, 'lin'),
-    on(1.20, [-0.40, -0.42], L3, 'lin'),
+    r3,
+    // уходя к ТЫ, правая сперва отрывается от пальцев левой вверх (−3.9 мм, аудит 28.09)
+    { ...r3, t: at(1.25), pos: r3.pos.clone().add(V(-0.01, 0.03, 0.01)), ease: 'sine' },
     { ...refKey('right', at(1.34), [-0.42, -0.25], [-0.70, -0.80], YOU), ease: 'sine' },
     { ...refKey('right', at(1.54), [-0.43, -0.24], [-0.67, -0.80], YOU), ease: 'lin' },
     { t: at(1.80), idle: true, ease: 'io' },
@@ -2347,6 +2391,326 @@ function pozhaluystaPodozhdite() {
   };
 }
 
+// ═══════════════ «Пожалуйста, повторите» (ЦОН, 28.09) ═══════════════
+// Эталон — spreadthesign.com/ru.ru/sentence/10146 (видео 133656), тот же носитель, что в «Пожалуйста, подождите».
+// Время жеста = время записи − 0.60 с. По кадрам (крупно ×0.9) и разметке подряд по кадрам (кисть сверена с запястьем
+// позы, ≤ 0.08 ширины плеч):
+//   ПОВТОРИТЕ 0.74–1.30. Левая — ладонью вверх у пояса слева, пальцы вправо и к зрителю (пясть в кадре 154…171°), запястье
+//   (0.26…0.40, −0.49…−0.61). Правая дважды «загребает» по левой ладони: 0.74–0.82 подходит согнутой к середине (запястье
+//   позы −0.42 → −0.27, −0.50…−0.54), 0.86 пальцы вытянуты над левой (пясть 42°), 0.94–1.06 отходит вправо и сжимается в
+//   кулак (запястье (−0.52…−0.56, −0.48…−0.54), пясть 42…66°); 1.10–1.22 снова к середине полусогнутой ((−0.47 → −0.29,
+//   −0.42…−0.60), пясть 53…72°), 1.26–1.30 сгибается.
+//   ПОЖАЛУЙСТА 1.46–1.94 «домиком»: запястья врозь (правое (−0.15…−0.19, −0.30…−0.39), левое (0.13…0.16, −0.31…−0.39)),
+//   пальцы вверх и друг к другу (правая пясть 73…76°, левая 95…101°), кончики сходятся над серединой. 1.98–2.14 вниз.
+function pozhaluystaPovtorite() {
+  const T0 = 0.60;
+  const at = (tr) => +(tr - T0).toFixed(3);
+  const R_BENT = shape({
+    index: { curl: [70, 55, 25], spread: 6 }, middle: { curl: [72, 55, 25], spread: 0 },
+    ring: { curl: [74, 55, 25], spread: -5 }, pinky: { curl: [76, 55, 25], spread: -10 },
+    thumb: { abd: 10, f1: 10, f2: 10, f3: 5 },
+  });
+  const R_FLAT = shape({
+    index: { curl: [25, 15, 8], spread: 6 }, middle: { curl: [26, 15, 8], spread: 0 },
+    ring: { curl: [27, 15, 8], spread: -5 }, pinky: { curl: [28, 15, 8], spread: -10 },
+    thumb: { abd: -10, f1: 0, f2: 5, f3: 0 },
+  });
+  const R_HALF = shape({
+    index: { curl: [45, 35, 15], spread: 6 }, middle: { curl: [46, 35, 15], spread: 0 },
+    ring: { curl: [48, 35, 15], spread: -5 }, pinky: { curl: [50, 35, 15], spread: -10 },
+    thumb: { abd: 5, f1: 5, f2: 5, f3: 0 },
+  });
+  // левая: пальцы почти прямые, большой вдоль указательного (у носителя в кадре 131…160° — туда же, куда пальцы)
+  const L_UP = shape({
+    index: { curl: [5, 5, 3], spread: 8 }, middle: { curl: [5, 5, 3], spread: 0 },
+    ring: { curl: [6, 5, 3], spread: -7 }, pinky: { curl: [7, 5, 3], spread: -14 },
+    thumb: { abd: 15, f1: -10, f2: 0, f3: 0 },
+  });
+  const ER = [-0.98, -0.80], EL = [0.76, -0.92];
+  // левая ладонью вверх, пальцы вправо и к зрителю
+  const LK = { fingers: dir(-0.7, 0.25, 0.67), palm: dir(0.276, 0.958, -0.07), shape: L_UP };
+  const lk = (tr, w2, ease = 'sine') => ({ ...refKey('left', at(tr), w2, EL, LK), ease });
+  // левая в ПОВТОРИТЕ стоит (у носителя дрейф ±0.07): при её подъёмах под лежащей правой кисти прорезали друг друга
+  // (аудит 28.09); одна поза — середина его рядов
+  const LW = [0.33, -0.56];
+  const l1 = lk(0.84, LW, 'io'), l2 = lk(0.87, LW), l3 = lk(1.06, LW), l4 = lk(1.21, LW), l5 = lk(1.28, LW);
+  // правая: пясть вверх-влево, пальцы загибаются на левую ладонь; кисть не уходит в левую (keepAbove)
+  const over1 = keepAbove({ ...refKey('right', at(0.87), [-0.33, -0.58], ER, { fingers: dir(0.65, 0.65, 0.4), palm: dir(0.55, -0.75, 0.2), shape: R_FLAT }), ease: 'sine' }, l2);
+  const over2 = keepAbove({ ...refKey('right', at(1.21), [-0.30, -0.59], ER, { fingers: dir(0.55, 0.75, 0.35), palm: dir(0.7, -0.6, 0.2), shape: R_HALF }), ease: 'sine' }, l4);
+  // ПОЖАЛУЙСТА «домиком»: правая пальцами к середине (74°), левая — её отражение; кисти сдвигаются до касания кончиков
+  const ROOF = { fingers: dir(0.28, 0.93, 0.25), palm: dir(0.96, -0.28, 0), shape: SH.flatPray };
+  const roof = (tr, w2, ease) => palmsTogether({ ...refKey('right', at(tr), w2, [-0.88, -0.86], ROOF, { zMin: 0.55 }), ease });
+  const p1 = roof(1.50, [-0.18, -0.32], 'sine'), p2 = roof(1.72, [-0.15, -0.34], 'sine'), p3 = roof(1.92, [-0.17, -0.38], 'sine');
+  const right = [
+    { t: 0, idle: true },
+    { t: at(0.66), idle: true },
+    // подходит сверху: левая ещё поднимается к ладони-подставке и не должна задеть согнутые пальцы правой
+    keepAbove({ ...refKey('right', at(0.80), [-0.30, -0.44], ER, { fingers: dir(0.35, 0.85, 0.4), palm: dir(0.85, -0.3, -0.1), shape: R_BENT }), ease: 'io' }, l1),
+    over1,
+    // отходя, правая сперва чуть приподнимается — сгибающиеся пальцы иначе цепляли левую (−4.8 мм, аудит 28.09)
+    { ...over1, t: at(0.91), pos: over1.pos.clone().add(V(-0.02, 0.035, 0)), shape: mixShape(R_FLAT, SH.byeClosed, 0.1), ease: 'sine' },
+    // после касаний правая не опускается сквозь левую (аудит 28.09) — ключи отхода тоже над левой
+    keepAbove({ ...refKey('right', at(0.96), [-0.46, -0.50], ER, { fingers: dir(0.5, 0.78, 0.37), palm: dir(0.8, -0.5, -0.05), shape: mixShape(R_FLAT, SH.byeClosed, 0.5) }), ease: 'sine' }, l3),
+    { ...refKey('right', at(1.04), [-0.55, -0.51], ER, { fingers: dir(0.45, 0.85, 0.25), palm: dir(0.85, -0.45, -0.1), shape: SH.byeClosed }), ease: 'sine' },
+    { ...refKey('right', at(1.12), [-0.46, -0.45], ER, { fingers: dir(0.35, 0.9, 0.25), palm: dir(0.85, -0.35, 0.05), shape: R_HALF }), ease: 'sine' },
+    over2,
+    // сжимаясь, правая отходит вправо — левая поворачивается к «домику» уже рядом с ней, а не под ней
+    keepAbove({ ...refKey('right', at(1.29), [-0.42, -0.56], ER, { fingers: dir(0.3, 0.92, 0.25), palm: dir(0.9, -0.3, 0.05), shape: mixShape(R_HALF, SH.byeClosed, 0.6) }), ease: 'sine' }, l5),
+    // аудит 28.09: сходясь в «домик» напрямик, пальцы прорезали друг друга (−11.2 мм) — подходят с боков, чуть врозь
+    { ...p1.r, t: at(1.42), pos: p1.r.pos.clone().add(V(-0.035, -0.02, 0)), ease: 'sine' },
+    p1.r, p2.r, p3.r,
+    { t: at(2.18), idle: true, ease: 'io' },
+  ];
+  const left = [
+    { t: 0, idle: true },
+    { t: at(0.66), idle: true },
+    l1, l2, l3, l4, l5,
+    // левая сперва поворачивается ладонью к середине (пальцы вперёд-вверх), потом поднимает пальцы (у носителя пясть
+    // 153 → 119 → 96°); большой вдоль указательного — не упирается в грудь
+    { ...refKey('left', at(1.35), [0.37, -0.41], EL, { fingers: dir(-0.45, 0.6, 0.66), palm: dir(-0.89, 0.3, 0.33), shape: L_UP }, { zMin: 0.6 }), ease: 'sine' },
+    { ...p1.l, t: at(1.42), pos: p1.l.pos.clone().add(V(0.035, -0.02, 0)), ease: 'sine' },
+    p1.l, p2.l, p3.l,
+    { t: at(2.18), idle: true, ease: 'io' },
+  ];
+  const head = [{ t: 0, pitch: 0 }, { t: at(0.76), pitch: 0 }, { t: at(0.90), pitch: -4 }, { t: at(1.94), pitch: -3 }, { t: at(2.14), pitch: 0 }];
+  return {
+    name: 'pozhaluysta-povtorite', duration: at(2.20), right, left, head,
+    description:
+      'РЖЯ «Пожалуйста, повторите», как у носителя в SpreadTheSign RU sentence 10146 (видео 133656), в его темпе: ' +
+      'ПОВТОРИТЕ — левая ладонью вверх, правая дважды загребает по ней и сжимается; затем ПОЖАЛУЙСТА — ладони «домиком» ' +
+      'перед грудью. Поза решена IK на avatar_elnar.glb (scripts/author-phrases.mjs).',
+  };
+}
+
+// ═══════════════ «Здравствуйте, вам помочь?» (ЦОН, 28.09) ═══════════════
+// Эталон — spreadthesign.com/ru.ru/sentence/23107 (видео 313532), одна носительница. Время жеста = время записи − 0.96 с.
+// По кадрам (крупно ×1.05) и разметке подряд по кадрам (кисть сверена с запястьем позы):
+//   ЗДРАВСТВУЙТЕ 1.10–1.78: 1.10–1.46 обе раскрытые кисти у груди по бокам, ладонями к себе, пальцы внутрь и вверх (правая
+//   пясть 31…46°, левая 139…148°), запястья широко — (∓0.78…0.89, −0.42…−0.60); 1.58–1.78 кисти поворачиваются ладонями
+//   вверх и уходят вперёд и к середине (правая (−0.72 → −0.47, −0.46…−0.51), левая (0.67 → 0.41, −0.48…−0.62)), пальцы
+//   к собеседнику.
+//   ВАМ ПОМОЧЬ 1.82–2.10: левая ладонью вверх, пальцы вперёд и вправо, большой вверх; правая ребром на ней — большой вверх,
+//   пальцы вперёд, ладонь к середине; запястья (−0.37…−0.41, −0.37…−0.56) и (0.24…0.30, −0.37…−0.58), кисти вместе чуть
+//   опускаются.
+//   Вопрос 2.14–2.42: кисти расходятся ладонями вверх, пальцы расслаблены, к 2.40 — в стороны (запястья позы ∓0.64…0.71).
+//   2.46–2.60 вниз.
+function zdravstvuyteVamPomoch() {
+  const T0 = 0.96;
+  const at = (tr) => +(tr - T0).toFixed(3);
+  const mirK = (k) => ({ ...k, fingers: mirV(k.fingers), palm: mirV(k.palm) });
+  // ЗДРАВСТВУЙТЕ у груди: раскрытая кисть, пальцы чуть врозь и согнуты к груди (у носительницы указательный в кадре на
+  // 20…30° ниже пясти)
+  const OPEN = shape({
+    index: { curl: [30, 22, 8], spread: -3 }, middle: { curl: [30, 22, 8], spread: 0 },
+    ring: { curl: [32, 22, 8], spread: 3 }, pinky: { curl: [34, 22, 8], spread: 6 },
+    thumb: { abd: -25, f1: -5, f2: 0, f3: 0 },
+  });
+  const CHEST = { fingers: dir(0.6, 0.6, 0.5), palm: dir(0.55, 0.2, -0.81), shape: OPEN };
+  // вперёд и ВАМ ПОМОЧЬ (крупно): правая — плоская, большой вверх, пальцы влево и вперёд, ладонь к груди; левая —
+  // «лодочкой», пальцы вправо и вверх, большой вверх
+  const FLAT_R = { fingers: dir(0.85, -0.05, 0.52), palm: dir(0.52, 0, -0.85), shape: SH.flatLhover };
+  const CUP_L = { fingers: dir(-0.6, 0.55, 0.58), palm: dir(-0.36, 0.47, -0.82), shape: SH.cupped };
+  const HELP_R = { fingers: dir(0.9, -0.05, 0.43), palm: dir(0.43, 0, -0.9), shape: SH.flatLhover };
+  // левая под ПОМОЧЬ: пальцы вправо и вперёд, ближе к горизонтали, чем у носительницы (в кадре 157° против её 137…151°):
+  // правая лежит ребром на ладони — при её пальцах, торчащих вверх, правую пришлось бы поднять над кончиками
+  const HELP_L = {
+    fingers: dir(-0.6, 0.25, 0.76), palm: dir(0.36, 0.93, -0.02),
+    shape: shape({
+      index: { curl: [20, 15, 8], spread: 8 }, middle: { curl: [20, 15, 8], spread: 0 },
+      ring: { curl: [22, 15, 8], spread: -7 }, pinky: { curl: [24, 15, 8], spread: -14 },
+      thumb: { abd: -30, f1: -10, f2: 0, f3: 0 },
+    }),
+  };
+  // вопрос: пальцы полусогнуты, большой вверх, ладони вверх; затем кисти в стороны
+  const CLAW = shape({
+    index: { curl: [45, 35, 15], spread: 6 }, middle: { curl: [46, 35, 15], spread: 0 },
+    ring: { curl: [48, 35, 15], spread: -5 }, pinky: { curl: [50, 35, 15], spread: -10 },
+    thumb: { abd: -30, f1: -5, f2: 0, f3: 0 },
+  });
+  const ASK = { fingers: dir(0.5, 0.55, 0.67), palm: dir(0.25, 0.65, -0.72), shape: CLAW };
+  const ASK_OUT = { fingers: dir(-0.5, 0.45, 0.74), palm: dir(0.2, 0.85, -0.5), shape: SH.openUp };
+  const ER = [-0.86, -0.94], EL = [0.86, -1.02];
+  const SAME_DEPTH = { zMin: 0.55, zMax: 0.65, zPref: 0.6 };
+  const R = (tr, w2, k, e = ER, ease = 'sine', o) => ({ ...refKey('right', at(tr), w2, e, k, o), ease });
+  const L = (tr, w2, k, e = EL, ease = 'sine', o) => ({ ...refKey('left', at(tr), w2, e, k, o), ease });
+  // правая ребром поперёк пальцев левой: левая стоит, где у носительницы; правая ставится чуть ниже и поднимается над
+  // левой до 3 мм (обе на одной глубине, иначе не встретятся)
+  const over = (r, l) => {
+    const m = touchNear(r, l);
+    if (Math.abs(m.gap - 0.003) > 0.001) throw new Error(`ВАМ ПОМОЧЬ ${r.t} с: кисти не сходятся (зазор ${(m.gap * 1000).toFixed(1)} мм)`);
+    return m;
+  };
+  const hl1 = L(1.88, [0.27, -0.42], HELP_L, [0.70, -1.0], 'sine', SAME_DEPTH);
+  const hr1 = over(R(1.88, [-0.38, -0.39], HELP_R, [-0.76, -0.93], 'sine', SAME_DEPTH), hl1);
+  const hl2 = L(2.04, [0.25, -0.58], HELP_L, [0.68, -0.98], 'sine', SAME_DEPTH);
+  const hr2 = over(R(2.04, [-0.40, -0.55], HELP_R, [-0.75, -0.94], 'sine', SAME_DEPTH), hl2);
+  const right = [
+    { t: 0, idle: true },
+    { t: at(1.00), idle: true },
+    R(1.14, [-0.84, -0.55], { ...CHEST, fingers: dir(0.65, 0.45, 0.6), palm: dir(0.6, 0.05, -0.8) }, ER, 'io'),
+    R(1.28, [-0.84, -0.45], CHEST),
+    R(1.46, [-0.79, -0.49], CHEST),
+    R(1.64, [-0.64, -0.46], FLAT_R, [-0.82, -0.89]),
+    R(1.78, [-0.47, -0.51], FLAT_R, [-0.84, -0.97]),
+    hr1, hr2,
+    // аудит 28.09: расходясь к вопросу, пальцы правой прорезали ладонь левой (−13.5 мм) — правая под загнутыми пальцами
+    // левой, поэтому сперва уходит вниз и вправо
+    { ...hr2, t: at(2.11), pos: hr2.pos.clone().add(V(-0.03, -0.035, 0)), ease: 'sine' },
+    R(2.20, [-0.52, -0.47], ASK, [-0.75, -0.92]),
+    R(2.38, [-0.65, -0.41], ASK_OUT, [-0.63, -0.92]),
+    { t: at(2.66), idle: true, ease: 'io' },
+  ];
+  const left = [
+    { t: 0, idle: true },
+    { t: at(1.00), idle: true },
+    L(1.14, [0.76, -0.50], mirK({ ...CHEST, fingers: dir(0.65, 0.45, 0.6), palm: dir(0.6, 0.05, -0.8) }), EL, 'io'),
+    L(1.28, [0.83, -0.51], mirK(CHEST)),
+    L(1.46, [0.74, -0.56], mirK(CHEST)),
+    L(1.64, [0.57, -0.57], CUP_L, [0.78, -0.97]),
+    L(1.78, [0.41, -0.48], CUP_L, [0.76, -1.0]),
+    hl1, hl2,
+    { ...hl2, t: at(2.11), pos: hl2.pos.clone().add(V(0.02, 0.01, 0)), ease: 'sine' },
+    L(2.20, [0.45, -0.50], mirK(ASK), [0.68, -0.99]),
+    L(2.38, [0.66, -0.47], mirK(ASK_OUT), [0.56, -0.98]),
+    { t: at(2.66), idle: true, ease: 'io' },
+  ];
+  const head = [{ t: 0, pitch: 0 }, { t: at(2.66), pitch: 0 }];
+  return {
+    name: 'zdravstvuyte-vam-pomoch', duration: at(2.68), right, left, head,
+    description:
+      'РЖЯ «Здравствуйте, вам помочь?», как у носительницы в SpreadTheSign RU sentence 23107 (видео 313532), в её темпе: ' +
+      'ЗДРАВСТВУЙТЕ — раскрытые ладони у груди, затем кисти вперёд к собеседнику; ВАМ ПОМОЧЬ — правая плоская, большой ' +
+      'вверх, ребром поперёк пальцев левой «лодочки»; вопрос — полусогнутые кисти вверх и в стороны. Поза решена IK на ' +
+      'avatar_elnar.glb (scripts/author-phrases.mjs).',
+  };
+}
+
+// ═══════════════ «Извините» (ЦОН, 28.09) ═══════════════
+// Эталон — spreadthesign.com/ru.ru/sentence/8811 (видео 100652), одна носительница. Время жеста = время записи − 0.56 с.
+// По кадрам и разметке подряд по кадрам: 0.62–0.70 обе руки поднимаются. 0.74–1.70 левая ладонью вверх перед грудью,
+// пальцы вправо (пясть в кадре 149…157°), запястье позы (0.24…0.34, −0.44…−0.57) — под правой почти не размечается.
+// Правая плоская, пальцы прямые и вместе, ладонью вниз, пальцы влево (пясть 2…39°), лежит на левой ладони и дважды
+// кругами трёт её (кончик указательного по x: 0.33 → 0.03 → 0.19 → 0.00), смещаясь вправо: запястье (−0.19…−0.23,
+// −0.37…−0.47) в 0.70–1.06 → (−0.31…−0.41, −0.34…−0.40) в 1.14–1.70. 1.74–1.86 кисти расходятся и опускаются.
+function izvinite() {
+  const T0 = 0.56;
+  const at = (tr) => +(tr - T0).toFixed(3);
+  const FLAT = shape({
+    index: { curl: [5, 5, 3], spread: 8 }, middle: { curl: [5, 5, 3], spread: 0 },
+    ring: { curl: [6, 5, 3], spread: -7 }, pinky: { curl: [7, 5, 3], spread: -14 },
+    thumb: { abd: -5, f1: 0, f2: 0, f3: 0 },
+  });
+  // левая ближе к горизонтали, чем у носительницы (в кадре ~170° против 149…157° после её выхода из-под правой): при
+  // поднятых пальцах левой правая, лёжа на ней, вставала на 0.13 ширины плеч выше носительницы
+  const LK = { fingers: dir(-0.9, 0.18, 0.4), palm: dir(0.2, 0.98, 0.0), shape: SH.flatUp };
+  const RK = { fingers: dir(0.9, 0.35, 0.25), palm: dir(0.3, -0.95, 0.0), shape: FLAT };
+  const ER = [-0.72, -0.93], EL = [0.58, -0.94];
+  const lk = (tr, w2, ease = 'sine') => ({ ...refKey('left', at(tr), w2, EL, LK), ease });
+  // правая на левой ладони: по высоте — до касания 3 мм (левая в тот же момент — там, где у носительницы)
+  const on = (tr, w2, ease = 'sine') => {
+    const l = lk(tr, [0.28 + (tr - 0.74) * 0.05, -0.53]);
+    const r = touchNear({ ...refKey('right', at(tr), w2, ER, RK), ease }, l);
+    if (Math.abs(r.gap - 0.003) > 0.001) throw new Error(`ИЗВИНИТЕ ${tr} с: кисти не сходятся (${(r.gap * 1000).toFixed(1)} мм)`);
+    return { r, l };
+  };
+  const c = [
+    on(0.80, [-0.20, -0.42], 'io'), on(0.94, [-0.21, -0.38]), on(1.06, [-0.25, -0.40]), on(1.18, [-0.34, -0.39]),
+    on(1.30, [-0.36, -0.37]), on(1.42, [-0.41, -0.36]), on(1.56, [-0.38, -0.35]), on(1.68, [-0.36, -0.39]),
+  ];
+  const right = [
+    { t: 0, idle: true },
+    { t: at(0.62), idle: true },
+    ...c.map((x) => x.r),
+    // аудит 28.09: отпуская вниз, правая прорезала пальцы левой (−13.5 мм) — сперва приподнимается и отходит вправо
+    { ...c[7].r, t: at(1.80), pos: c[7].r.pos.clone().add(V(-0.07, 0.04, 0)), shape: mixShape(FLAT, SH.rest, 0.4), ease: 'sine' },
+    { t: at(2.04), idle: true, ease: 'io' },
+  ];
+  const left = [
+    { t: 0, idle: true },
+    { t: at(0.62), idle: true },
+    { ...c[0].l, ease: 'io' },
+    ...c.slice(1).map((x) => x.l),
+    // пальцы левой смотрят на правую — левая сперва отходит влево, чтобы правая, опускаясь, не прошла сквозь её кончики
+    lk(1.84, [0.46, -0.55]),
+    { t: at(2.04), idle: true, ease: 'io' },
+  ];
+  const head = [{ t: 0, pitch: 0 }, { t: at(2.04), pitch: 0 }];
+  return {
+    name: 'izvinite', duration: at(2.06), right, left, head,
+    description:
+      'РЖЯ «Извините», как у носительницы в SpreadTheSign RU sentence 8811 (видео 100652), в её темпе: левая ладонью ' +
+      'вверх перед грудью, правая плоская ладонью вниз дважды кругами трёт её. Поза решена IK на avatar_elnar.glb ' +
+      '(scripts/author-phrases.mjs).',
+  };
+}
+
+// ═══════════════ ДОКУМЕНТ (ЦОН, 28.09) ═══════════════
+// Эталон — spreadthesign.com/ru.ru/word/7926 «документ» (видео 295361), одна носительница. Время жеста = время записи −
+// 0.10 с. По кадрам и разметке подряд по кадрам: 0.10–0.30 руки поднимаются. 0.34–0.54 правый кулак торчком над правой
+// стороной груди (пясть вверх 67…71°, запястье (−0.43…−0.51, −0.13…0.11)); левая — ладонью вверх, пальцы вправо (пясть
+// 136…169°), запястье (0.12…0.21, −0.20…−0.46). «Печать» дважды: 0.62–0.78 кулак ребром на левой ладони (запястье позы
+// (−0.33…−0.41, −0.22…−0.25)), 0.82–0.90 чуть поднимается (−0.14…−0.17), 0.98–1.20 снова на ладони (−0.26…−0.30,
+// −0.30…−0.36); 1.10–1.26 обе кисти вместе опускаются (левая до −0.57). 1.30–1.46 вниз.
+function dokument() {
+  const T0 = 0.10;
+  const at = (tr) => +(tr - T0).toFixed(3);
+  // кулак торчком в замахе; на ладони (крупно ×1.4) — предплечье горизонтально, кулак ладонью вниз на середине левой ладони
+  const FIST = { fingers: dir(0.35, 0.92, 0.15), palm: dir(0.93, -0.35, 0), shape: SH.fist };
+  // «печать» ребром: предплечье горизонтально, кулак влево и чуть вперёд, большой сверху, на ладонь опускается мизинцевая
+  // сторона (ладонью вниз большой палец выступал книзу и вставал на ладонь первым — кулак висел над ней)
+  const FIST_DOWN = { fingers: dir(0.95, -0.1, 0.3), palm: dir(0.3, 0, -0.95), shape: SH.fist };
+  // левая ладонью вверх, большой вверх (у носительницы в кадре 77…119°); пальцы ближе к горизонтали, чем у неё (в кадре
+  // ~169° против её 146…169°) — иначе кулак, лёжа на ладони, вставал выше её поднятых кончиков
+  const LK = {
+    fingers: dir(-0.95, 0.18, 0.25), palm: dir(0.17, 0.98, 0.0),
+    shape: shape({
+      index: { curl: [4, 5, 3], spread: 8 }, middle: { curl: [4, 5, 3], spread: 0 },
+      ring: { curl: [5, 6, 3], spread: -7 }, pinky: { curl: [6, 7, 4], spread: -14 },
+      thumb: { abd: -30, f1: 15, f2: 0, f3: 0 },
+    }),
+  };
+  const ER = [-1.0, -0.66], EL = [0.76, -0.88];
+  // на ладони кулак ближе к груди, чем большой палец левой (он торчит вверх на её переднем крае): левая на глубине ~0.62,
+  // правая ~0.50 ширины плеч
+  const L_DEPTH = { zMin: 0.6, zMax: 0.66, zPref: 0.62 }, R_DEPTH = { zMin: 0.46, zMax: 0.54, zPref: 0.5 };
+  const lk = (tr, w2, ease = 'sine', o) => ({ ...refKey('left', at(tr), w2, EL, LK, o), ease });
+  const rk = (tr, w2, ease = 'sine', k = FIST, o) => ({ ...refKey('right', at(tr), w2, ER, k, o), ease });
+  // кулак ребром на левой ладони: по высоте — до касания 3 мм
+  const stamp = (tr, w2r, w2l) => {
+    const l = lk(tr, w2l, 'sine', L_DEPTH);
+    const r = touchNear(rk(tr, w2r, 'sine', FIST_DOWN, R_DEPTH), l, { fromAbove: true });
+    if (Math.abs(r.gap - 0.003) > 0.001) throw new Error(`ДОКУМЕНТ ${tr} с: кулак не встал на ладонь (${(r.gap * 1000).toFixed(1)} мм)`);
+    return { r, l };
+  };
+  const s1 = stamp(0.66, [-0.34, -0.23], [0.15, -0.24]), s2 = stamp(0.76, [-0.39, -0.25], [0.12, -0.29]);
+  const s3 = stamp(1.00, [-0.28, -0.30], [0.15, -0.32]), s4 = stamp(1.12, [-0.28, -0.33], [0.14, -0.40]);
+  const s5 = stamp(1.24, [-0.29, -0.45], [0.15, -0.52]);
+  const right = [
+    { t: 0, idle: true },
+    { t: at(0.12), idle: true },
+    rk(0.36, [-0.49, -0.10], 'io'), rk(0.48, [-0.46, 0.10]),
+    s1.r, s2.r, rk(0.86, [-0.40, -0.14], 'sine', { ...FIST_DOWN, fingers: dir(0.85, 0.3, 0.43), palm: dir(0.45, 0, -0.89) }), s3.r, s4.r, s5.r,
+    // аудит 28.09: из «печати» прямо в покой кулак прорезал левую ладонь (−19.5 мм) — сперва приподнимается и отходит вправо
+    { ...s5.r, t: at(1.32), pos: s5.r.pos.clone().add(V(-0.05, 0.03, 0)), ease: 'sine' },
+    { t: at(1.52), idle: true, ease: 'io' },
+  ];
+  const left = [
+    { t: 0, idle: true },
+    { t: at(0.12), idle: true },
+    lk(0.34, [0.21, -0.46], 'io'), lk(0.50, [0.16, -0.22]),
+    s1.l, s2.l, lk(0.86, [0.12, -0.34]), s3.l, s4.l, s5.l,
+    lk(1.32, [0.19, -0.64]),
+    { t: at(1.52), idle: true, ease: 'io' },
+  ];
+  const head = [{ t: 0, pitch: 0 }, { t: at(1.52), pitch: 0 }];
+  return {
+    name: 'words/dokument', duration: at(1.54), right, left, head,
+    description:
+      'РЖЯ ДОКУМЕНТ, как у носительницы в SpreadTheSign RU word 7926 (видео 295361), в её темпе: правый кулак торчком ' +
+      'дважды ставит «печать» ребром на левую ладонь. Поза решена IK на avatar_elnar.glb (scripts/author-phrases.mjs).',
+  };
+}
+
 /**
  * Кулак у лица: передняя сторона кулака (тыл средних фаланг среднего пальца —
  * у сжатой кисти он смотрит туда же, куда ладонь) ставится на точку лица
@@ -2512,7 +2876,8 @@ const PHRASES = { 'kak-dela': kakDela, 'kak-pomoch': kakPomoch, spasibo, 'ya-lyu
   'ya-lyublyu-tebya': yaLyublyuTebya, 'ty-khochesh-est': tyKhocheshEst,
   'words/poka': poka, 'words/net': net, 'words/gde': gde, 'words/pit': pit,
   // Окно ЦОН (27.09)
-  'pozhaluysta-podozhdite': pozhaluystaPodozhdite };
+  'pozhaluysta-podozhdite': pozhaluystaPodozhdite, 'pozhaluysta-povtorite': pozhaluystaPovtorite,
+  'zdravstvuyte-vam-pomoch': zdravstvuyteVamPomoch, izvinite, 'words/dokument': dokument };
 const want = (n) => !only.length || only.includes(n) || (n.startsWith('words/') && only.includes('words'));
 const built = new Map();
 const phraseObj = (n) => { if (!built.has(n)) built.set(n, PHRASES[n]()); return built.get(n); };

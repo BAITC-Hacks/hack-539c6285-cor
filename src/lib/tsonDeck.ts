@@ -24,6 +24,7 @@ export const TSON_DECK: TsonGroup[] = [
   {
     title: 'tson.g.greet',
     phrases: [
+      { key: 'tson.p.hello', file: 'zdravstvuyte-vam-pomoch' },
       { key: 'tson.p.help', file: 'kak-pomoch' },
       { key: 'tson.p.name', file: 'kak-tebya-zovut' },
     ],
@@ -32,6 +33,8 @@ export const TSON_DECK: TsonGroup[] = [
     title: 'tson.g.wait',
     phrases: [
       { key: 'tson.p.wait', file: 'pozhaluysta-podozhdite' },
+      { key: 'tson.p.sorry', file: 'izvinite' },
+      { key: 'tson.p.document', file: 'words/dokument' },
     ],
   },
   {
@@ -42,6 +45,7 @@ export const TSON_DECK: TsonGroup[] = [
       { key: 'tson.p.ok', file: 'words/khorosho' },
       { key: 'tson.p.please', file: 'words/pozhaluysta' },
       { key: 'tson.p.notUnderstand', file: 'ya-ne-ponimayu' },
+      { key: 'tson.p.repeat', file: 'pozhaluysta-povtorite' },
       { key: 'tson.p.where', file: 'words/gde' },
     ],
   },
