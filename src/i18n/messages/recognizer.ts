@@ -63,9 +63,28 @@ export const recognizer: Dictionary = {
   'recognizer.controls.stop': { kk: 'Тоқтату', ru: 'Остановить', en: 'Stop' },
   'recognizer.mirror.label': { kk: 'Айна', ru: 'Зеркало', en: 'Mirror' },
   'recognizer.mirror.hint': {
-    kk: 'Камера кескінін көлденең аудару',
-    ru: 'Отразить изображение камеры по горизонтали',
-    en: 'Flip camera input horizontally',
+    kk: 'Сол қолмен көрсетсеңіз: модельге нүктелер айнадағыдай беріледі',
+    ru: 'Если жестикулируете левой рукой: модель получает точки в зеркальном отражении',
+    en: 'If you sign with your left hand: the model gets mirrored landmarks',
+  },
+  'recognizer.autoSpeak.label': { kk: 'Сөздерді дауыстап оқу', ru: 'Озвучивать слова', en: 'Speak words' },
+  'recognizer.autoSpeak.hint': {
+    kk: 'Танылған әр сөзді бірден дауыстап оқу',
+    ru: 'Сразу произносить каждое принятое слово',
+    en: 'Say each accepted word out loud right away',
+  },
+  // Строка состояния камеры
+  'recognizer.fps': { kk: 'MediaPipe: {fps} кадр/с', ru: 'MediaPipe: {fps} кадров/с', en: 'MediaPipe: {fps} fps' },
+  'recognizer.fps.low': {
+    kk: 'аз — артық бағдарламалар мен қойындыларды жабыңыз',
+    ru: 'мало — закройте лишние программы и вкладки',
+    en: 'low — close other apps and tabs',
+  },
+  'recognizer.hands.none': { kk: 'қолдар көрінбейді', ru: 'руки не видны', en: 'hands not visible' },
+  'recognizer.tracker.failed': {
+    kk: 'MediaPipe іске қосылмады. Интернетті тексеріп, бетті қайта жүктеңіз (Chrome ұсынылады).',
+    ru: 'MediaPipe не запустился. Проверьте интернет и перезагрузите страницу (лучше в Chrome).',
+    en: 'MediaPipe did not start. Check the connection and reload the page (Chrome works best).',
   },
   'recognizer.toggle.on': { kk: 'ҚОСУЛЫ', ru: 'ВКЛ', en: 'ON' },
   'recognizer.toggle.off': { kk: 'ӨШІРУЛІ', ru: 'ВЫКЛ', en: 'OFF' },
@@ -104,18 +123,14 @@ export const recognizer: Dictionary = {
   'recognizer.model.architecture': { kk: 'Архитектура', ru: 'Архитектура', en: 'Architecture' },
   'recognizer.model.features': { kk: 'Белгілер', ru: 'Признаки', en: 'Features' },
   'recognizer.model.accuracy': { kk: 'Дәлдік', ru: 'Точность', en: 'Accuracy' },
-  // Выбор модели
+  'recognizer.model.tracker': { kk: 'Трекер', ru: 'Трекер', en: 'Tracker' },
+  'recognizer.tracker.refine': { kk: 'бет пен қарашықтар', ru: 'лицо и зрачки', en: 'face + irises' },
+  // Модель
   'recognizer.model.qyran240': { kk: 'Qyran-240', ru: 'Qyran-240', en: 'Qyran-240' },
-  'recognizer.model.slovo1001': { kk: 'SLOVO-1001', ru: 'SLOVO-1001', en: 'SLOVO-1001' },
   'recognizer.model.qyran240.hint': {
     kk: 'Біздің модель: YouTube-тағы орыс ым тілінің 240 сөзі, үш желінің ансамблі',
     ru: 'Наша модель: 240 слов русского жестового языка с YouTube, ансамбль из трёх сетей',
     en: 'Our own model: 240 Russian Sign Language words from YouTube, an ensemble of three networks',
-  },
-  'recognizer.model.slovo1001.hint': {
-    kk: 'SLOVO деректер жинағындағы 1001 ым',
-    ru: '1001 жест из датасета SLOVO',
-    en: '1,001 signs from the SLOVO dataset',
   },
 
   // Словарь жестов
@@ -130,8 +145,8 @@ export const recognizer: Dictionary = {
     en: 'Press Start to begin',
   },
   'recognizer.history.note': {
-    kk: 'Сенімді танулар (≥70%) осында шығады',
-    ru: 'Уверенные распознавания (≥70%) появятся здесь',
-    en: 'Confident detections (≥70%) appear here',
+    kk: 'Модель сөзді қатарынан екі рет сенімді атағанда, ол осында шығады',
+    ru: 'Слово появится здесь, когда модель дважды подряд уверенно его назовёт',
+    en: 'A word appears here once the model names it confidently twice in a row',
   },
 };

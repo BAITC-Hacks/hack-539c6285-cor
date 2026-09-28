@@ -12,3 +12,12 @@ dist
 scripts
 *.sh
 *.bak
+
+# SLOVO-1001 с сайта убрана (28.09): распознаватель — только Кыран-240
+# (public/model/qyran240). Локально файлы остаются, на сайт не уходят.
+public/model/model.json
+public/model/group1-shard1of2.bin
+public/model/group1-shard2of2.bin
+public/model/label_map.json
+public/model/model_config.json
+public/model/vocabularies.json

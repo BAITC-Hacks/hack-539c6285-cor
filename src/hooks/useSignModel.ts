@@ -9,13 +9,10 @@
  *   const result = await predict(landmarks);
  *   // result = { label: "хороший", confidence: 0.92, top5: [...], probs: Float32Array }
  *
- * Supports both the legacy model ([1,60,255], StandardScaler in scaler.json)
- * and the new model ([1,60,259], no scaler, includes a 'no_event' class).
- * The per-frame feature count is derived from the loaded model's input shape.
- *
- * Моделей две (SIGN_MODELS): Кыран-240 — своя, ансамбль из трёх сетей, чьи
- * вероятности усредняются (как на тестовом стенде, где мерили её точность), и
- * SLOVO-1001 — одна сеть на 1001 знак.
+ * Модель одна — Кыран-240: ансамбль из трёх сетей, чьи вероятности
+ * усредняются, как на тестовом стенде (ml/youtube_rsl/webtest), где мерили её
+ * точность. SLOVO-1001 с сайта убрана (28.09). Число признаков на кадр берётся
+ * из входа загруженной модели (319).
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as tf from '@tensorflow/tfjs';
@@ -41,65 +38,29 @@ interface UseSignModelReturn {
   /** Per-frame feature count derived from the model input shape (255 legacy, 259 new). */
   featuresPerFrame: number;
   /**
-   * Download progress of the weights, 0..1. The model is ~8 MB, which is tens
+   * Download progress of the weights, 0..1. Three members are ~21 MB, which is tens
    * of seconds on a weak connection — without a number the page just sits on
    * "Loading" and reads as frozen.
    */
   progress: number;
   labelMap: Record<string, number>;
   idxToLabel: Record<number, string>;
-  /** Сколько знаков разрешено сценарием; null — ограничения нет. */
-  vocabSize: number | null;
 }
-
-export type SignModelId = 'qyran240' | 'slovo1001';
 
 /**
- * Модели распознавателя. `base` — папка в public/, там label_map.json и
- * model_config.json; `members` — подпапки с model.json участников ансамбля
- * ('' — сама base). Словари сценария (vocabularies.json) составлены по меткам
- * SLOVO, поэтому применяются только к ней.
+ * Кыран-240 в public/: label_map.json и model_config.json лежат в `base`,
+ * `members` — подпапки с model.json трёх участников ансамбля. Веса те же
+ * байт в байт, что на стенде (webtest/model, model_e2, model_e3).
  */
-export const SIGN_MODELS: Record<SignModelId, { base: string; members: string[]; vocabularies: boolean }> = {
-  qyran240: { base: '/model/qyran240', members: ['m1', 'm2', 'm3'], vocabularies: false },
-  slovo1001: { base: '/model', members: [''], vocabularies: true },
-};
-export const DEFAULT_SIGN_MODEL: SignModelId = 'qyran240';
+export const QYRAN_MODEL = { base: '/model/qyran240', members: ['m1', 'm2', 'm3'] } as const;
 
-const SCALER_URL = '/model/scaler.json';
-const VOCAB_URL = '/model/vocabularies.json';
 const SEQ_LEN = 60;
-const DEFAULT_FEATURES = 255;
+const DEFAULT_FEATURES = 319;
 
-interface UseSignModelOptions {
-  /**
-   * Ограничить выход словарём сценария из vocabularies.json.
-   *
-   * Модель обучена на 1001 знак, но за конкретной стойкой показывают две
-   * сотни. Зануление недопустимых классов перед argmax поднимает точность на
-   * невиданных подписантах с 58.5% до 80.9% — измерено, ml/vocab_experiment.py.
-   * Дообучение на том же словаре дало +0.2 пункта при стандартной ошибке 1.8,
-   * то есть ничего: решает сужение словаря, а не способ его добиться. Поэтому
-   * одна модель и словарь на площадку, а не модель на площадку.
-   *
-   * undefined — без ограничения, все 1001 класс.
-   */
-  vocabulary?: string;
-  /** Какая модель распознаёт; по умолчанию DEFAULT_SIGN_MODEL. */
-  model?: SignModelId;
-}
-
-export function useSignModel(options: UseSignModelOptions = {}): UseSignModelReturn {
-  const { vocabulary, model: modelId = DEFAULT_SIGN_MODEL } = options;
-  const spec = SIGN_MODELS[modelId] ?? SIGN_MODELS[DEFAULT_SIGN_MODEL];
-  /** Индексы классов, разрешённых сценарием. null — ограничения нет. */
-  const allowedRef = useRef<Uint8Array | null>(null);
-  const [vocabSize, setVocabSize] = useState<number | null>(null);
-  /** Участники ансамбля; у одиночной модели — один. */
+export function useSignModel(): UseSignModelReturn {
+  const spec = QYRAN_MODEL;
+  /** Участники ансамбля. */
   const modelsRef = useRef<(tf.GraphModel | tf.LayersModel)[]>([]);
-  // Pre-built scaler tensors (built ONCE at load time, null when no scaler.json).
-  const scalerMeanRef = useRef<tf.Tensor1D | null>(null);
-  const scalerScaleRef = useRef<tf.Tensor1D | null>(null);
   const featuresRef = useRef<number>(DEFAULT_FEATURES);
   const [featuresPerFrame, setFeaturesPerFrame] = useState<number>(DEFAULT_FEATURES);
   const [labelMap, setLabelMap] = useState<Record<string, number>>({});
@@ -109,7 +70,7 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  // Load model + label map + optional scaler
+  // Load the three ensemble members + label map
   useEffect(() => {
     let cancelled = false;
 
@@ -118,34 +79,13 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
       setIsLoaded(false);
       setProgress(0);
       setError(null);
-      // Смена модели: прежние сети освобождаем, пока грузится новая — предсказаний нет.
       const old = modelsRef.current;
       modelsRef.current = [];
       old.forEach((m) => m.dispose());
-      scalerMeanRef.current?.dispose();
-      scalerScaleRef.current?.dispose();
-      scalerMeanRef.current = null;
-      scalerScaleRef.current = null;
 
       try {
-        // Load label map and scaler in parallel. scaler.json is OPTIONAL:
-        // the new model ships without one (404 / network error -> null).
-        // Скейлер бывал только у старой модели в /model — у Кырана его не ищем.
-        const [lmRes, scalerRes] = await Promise.all([
-          fetch(`${spec.base}/label_map.json`),
-          spec.base === '/model' ? fetch(SCALER_URL).catch(() => null) : Promise.resolve(null),
-        ]);
-
+        const lmRes = await fetch(`${spec.base}/label_map.json`);
         if (!lmRes.ok) throw new Error(`Failed to load label_map.json: ${lmRes.status}`);
-
-        let scalerData: { mean: number[]; scale: number[] } | null = null;
-        if (scalerRes && scalerRes.ok) {
-          try {
-            scalerData = await scalerRes.json();
-          } catch {
-            scalerData = null;
-          }
-        }
 
         const lm: Record<string, number> = await lmRes.json();
         if (cancelled) return;
@@ -156,29 +96,6 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
           i2l[idx] = label;
         }
         setIdxToLabel(i2l);
-
-        // Словарь сценария. Отсутствие файла или неизвестное имя — не ошибка:
-        // распознаватель просто работает на полном словаре, как раньше.
-        allowedRef.current = null;
-        setVocabSize(null);
-        if (vocabulary && spec.vocabularies) {
-          try {
-            const vRes = await fetch(VOCAB_URL);
-            const all: Record<string, { words: string[] }> = await vRes.json();
-            const words = all[vocabulary]?.words;
-            if (!words) throw new Error(`нет словаря «${vocabulary}»`);
-            const mask = new Uint8Array(Object.keys(lm).length);
-            let n = 0;
-            for (const w of words) {
-              const i = lm[w];
-              if (i !== undefined && !mask[i]) { mask[i] = 1; n++; }
-            }
-            allowedRef.current = mask;
-            setVocabSize(n);
-          } catch (e) {
-            console.warn('[Qyran] словарь сценария не применён:', e);
-          }
-        }
 
         // Load as layers model (Keras export)
         // Прогресс загрузки.
@@ -263,24 +180,9 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
         featuresRef.current = features;
         setFeaturesPerFrame(features);
 
-        // Pre-build scaler tensors ONCE (avoids per-predict tensor allocation).
-        // Skip entirely when no scaler.json (new model needs no scaling) or on
-        // a dimension mismatch (e.g. stale scaler next to a new model).
-        if (scalerData && Array.isArray(scalerData.mean) && Array.isArray(scalerData.scale)) {
-          if (scalerData.mean.length === features && scalerData.scale.length === features) {
-            scalerMeanRef.current = tf.tensor1d(scalerData.mean);
-            scalerScaleRef.current = tf.tensor1d(scalerData.scale);
-            console.log('[Qyran] Scaler loaded');
-          } else {
-            console.warn('[Qyran] scaler.json dims do not match model input — skipping scaling');
-          }
-        } else {
-          console.log('[Qyran] No scaler.json — running without input scaling');
-        }
-
         modelsRef.current = members;
         setIsLoaded(true);
-        console.log(`[Qyran] Model ${modelId} ready. Classes: ${Object.keys(lm).length}, features/frame: ${features}, ensemble: ${members.length}`);
+        console.log(`[Qyran] Qyran-240 ready. Classes: ${Object.keys(lm).length}, features/frame: ${features}, ensemble: ${members.length}`);
 
         // Warmup inference
         const dummy = tf.zeros([1, SEQ_LEN, features]);
@@ -303,7 +205,7 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
 
     load();
     return () => { cancelled = true; };
-  }, [vocabulary, modelId]);
+  }, []);
 
   // Уход со страницы — сети освобождаем (ансамбль держит в памяти три).
   useEffect(() => () => {
@@ -338,42 +240,18 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
         input = tf.tensor3d([landmarks], [1, SEQ_LEN, features]);
       }
 
-      // Apply scaler normalization: (x - mean) / scale (legacy model only).
-      // Tensors are pre-built at load time; tf.tidy does not dispose them
-      // because they were created outside this scope.
-      const mean = scalerMeanRef.current;
-      const scale = scalerScaleRef.current;
-      if (mean && scale) {
-        input = input.sub(mean).div(scale) as tf.Tensor3D;
-      }
-
-      // Run inference: у ансамбля вероятности участников усредняются
-      let raw: Float32Array | null = null;
+      // Run inference: вероятности трёх участников усредняются, как на стенде
+      let probs: Float32Array | null = null;
       for (const m of members) {
         const output = m instanceof tf.GraphModel ? m.predict(input) : (m as tf.LayersModel).predict(input);
         const probsTensor = output instanceof tf.Tensor ? output : (output as tf.Tensor[])[0];
         const p = probsTensor.dataSync() as Float32Array;
-        if (!raw) raw = members.length === 1 ? p : new Float32Array(p.length);
-        if (members.length > 1) for (let i = 0; i < p.length; i++) raw[i] += p[i] / members.length;
+        if (!probs) probs = members.length === 1 ? p : new Float32Array(p.length);
+        if (members.length > 1) for (let i = 0; i < p.length; i++) probs[i] += p[i] / members.length;
       }
-      if (!raw) return null;
+      if (!probs) return null;
 
-      // Ограничение словарём применяется К САМОМУ ВЕКТОРУ probs, а не только к
-      // top5. Потребители берут именно probs и считают свой argmax поверх
-      // сглаживания (RecognizerPage ведёт EMA по всему вектору) — фильтрация
-      // только на выходе top5 не влияла бы ни на одно решение.
-      //
-      // Массу не перенормируем: уверенность должна остаться в той же шкале,
-      // на которой откалиброван порог тишины.
-      const allowed = allowedRef.current;
-      const probs = allowed ? Float32Array.from(raw) : raw;
-      if (allowed) {
-        for (let i = 0; i < probs.length; i++) if (allowed[i] !== 1) probs[i] = 0;
-      }
-
-      const indexed = Array.from(probs)
-        .map((p, i) => ({ idx: i, prob: p }))
-        .filter(({ idx }) => !allowed || allowed[idx] === 1);
+      const indexed = Array.from(probs).map((p, i) => ({ idx: i, prob: p }));
       indexed.sort((a, b) => b.prob - a.prob);
       if (indexed.length === 0) return null;
       const top5 = indexed.slice(0, 5).map(({ idx, prob }) => ({
@@ -418,6 +296,5 @@ export function useSignModel(options: UseSignModelOptions = {}): UseSignModelRet
     progress,
     labelMap,
     idxToLabel,
-    vocabSize,
   };
 }

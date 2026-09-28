@@ -1,15 +1,21 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useSignModel, SIGN_MODELS, DEFAULT_SIGN_MODEL, type SignModelId } from '@/hooks/useSignModel';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useSignModel, QYRAN_MODEL } from '@/hooks/useSignModel';
 import { AslDactyl } from '@/lib/aslDactyl';
 import { useSpeech } from '@/hooks/useSpeech';
-import { drawConnectors, drawLandmarks } from '@mediapipe/drawing_utils';
-import { drawTrackedSkeleton, type OverlayState } from '@/lib/skeletonOverlay';
-import { HolisticStabilizer, DEFAULT_CONFIG, type StabilizerConfig, type StabilizedSet } from '@/lib/landmarkStabilizer';
-// @ts-ignore - constants are not in TS types
-import { POSE_CONNECTIONS, FACEMESH_TESSELATION, HAND_CONNECTIONS } from '@mediapipe/holistic';
-import { normalizeWindow, featurizeWindow, resampleWindow, BASE_DIM, OUT_DIM } from '@/lib/features';
+import { HolisticStabilizer, DEFAULT_CONFIG, type StabilizerConfig, type StabilizedSet, type StabilizedHolistic } from '@/lib/landmarkStabilizer';
+import {
+  HAND_CONNECTIONS,
+  FACEMESH_FACE_OVAL,
+  FACEMESH_LIPS,
+  FACEMESH_LEFT_EYE,
+  FACEMESH_RIGHT_EYE,
+  FACEMESH_LEFT_EYEBROW,
+  FACEMESH_RIGHT_EYEBROW,
+  FACEMESH_LEFT_IRIS,
+  FACEMESH_RIGHT_IRIS,
+} from '@mediapipe/holistic';
+import { featurizeWindow } from '@/lib/features';
 import { useT } from '@/i18n';
-import { useTheme } from '@/app/context/ThemeContext';
 import { ThemeToggle } from '@/app/components/shared/ThemeToggle';
 import { LangSwitcher } from '@/app/components/shared/LangSwitcher';
 
@@ -21,53 +27,30 @@ const NUM_HAND = 21;
 const FEATURES = 255; // (33 + 10 + 21 + 21) * 3 — raw MediaPipe vector per frame
 const SEQ_LEN = 60;
 
-// Wall-clock capture / prediction cadence (frame-rate independent)
-const SEND_MIN_INTERVAL_MS = 33;   // throttle holistic.send to ~30 fps max
-const BUFFER_MS = 2500;            // rolling landmark buffer horizon
-const WINDOW_MS = 2000;            // model window duration
-const PREDICT_INTERVAL_MS = 500;   // prediction tick period
-
-// EMA smoothing over full probability vectors + decision thresholds.
-//
-// Значения ИЗМЕРЕНЫ симуляцией боевого конвейера на 1652 клипах невиданных
-// подписантов (ml/simulate_app.py — окно, тики, EMA и пороги повторены один в
-// один). Прежняя пара EMA_KEEP=0.65 + COMMIT_THRESHOLD=0.65 давала МОЛЧАНИЕ на
-// 79% знаков: за ~1.5 c знака EMA не успевала доползти до порога, и ответ не
-// появлялся вообще. Текущая точка: верный коммит 46% знаков, молчание 19%,
-// медианная задержка 3.0 с, ложные на тишине ~3/мин. Дальше точность двигает
-// только модель/словарь (?vocab=...), не пороги.
-const EMA_KEEP = 0.35;             // быстрое сглаживание: s = 0.35*s + 0.65*p
-const DISPLAY_THRESHOLD = 0.40;    // show candidate word
-const COMMIT_TICKS = 2;            // consecutive qualifying ticks to commit a chip
-const NO_EVENT_MAX = 0.35;         // new model: max smoothed no_event to display
-const COMMIT_THRESHOLD = 0.45;     // new model: commit level
-const REARM_NO_EVENT = 0.5;        // new model: no_event level that re-arms after a commit
-const OLD_COMMIT_THRESHOLD = 0.7;  // legacy model (no no_event class): commit level
-const CHIP_COOLDOWN_MS = 1500;     // legacy model: cooldown between chips
-
-/**
- * Пороги решения по модели. SLOVO-1001 — числа выше (подобраны симуляцией).
- * Кыран-240 — правило тестового стенда, на котором мерили её точность: на 240
- * классах softmax редко даёт больше 0.3 даже на верном ответе, поэтому слово
- * принимается при top-1 ≥ 0.25, если оно в 1.8 раза выше второго и выше no_event.
- */
-const DECISION: Record<SignModelId, { display: number; commit: number; ratio: number; noEventMax: number | 'beat' }> = {
-  slovo1001: { display: DISPLAY_THRESHOLD, commit: COMMIT_THRESHOLD, ratio: 1, noEventMax: NO_EVENT_MAX },
-  qyran240: { display: 0.25, commit: 0.25, ratio: 1.8, noEventMax: 'beat' },
-};
-
-/** Модель при входе: ?model=qyran240|slovo1001 (или qyran|slovo), иначе последний выбор, иначе по умолчанию. */
-const SIGN_MODEL_KEY = 'qyran.signModel';
-function initialSignModel(): SignModelId {
-  const q = new URLSearchParams(window.location.search).get('model');
-  const alias: Record<string, SignModelId> = { qyran: 'qyran240', qyran240: 'qyran240', slovo: 'slovo1001', slovo1001: 'slovo1001' };
-  if (q && alias[q]) return alias[q];
-  try {
-    const v = localStorage.getItem(SIGN_MODEL_KEY);
-    if (v === 'qyran240' || v === 'slovo1001') return v;
-  } catch { /* приватный режим — просто по умолчанию */ }
-  return DEFAULT_SIGN_MODEL;
-}
+// ---------------------------------------------------------------------------
+// Камера — конвейер тестового стенда «Кыран» (ml/youtube_rsl/webtest/app.js),
+// на котором Кыран-240 проверяли до деплоя. Веса там и здесь одни и те же
+// байт в байт, поэтому всё между камерой и сетью повторяет стенд:
+//  * MediaPipe Holistic той же сборки, лицо с уточнением (refineFaceLandmarks),
+//    собственное сглаживание MediaPipe выключено;
+//  * окно модели — последние 60 обработанных кадров, без пересчёта по времени
+//    и без смешивания соседних кадров;
+//  * предсказание раз в 15 кадров, решение — по сырым вероятностям ансамбля:
+//    top-1 не no_event, не ниже 25 % и в 1.8 раза выше второго места;
+//  * слово встаёт во фразу после двух таких замеров подряд и не чаще раза в
+//    1.2 с; то же слово ещё раз — только после паузы (замера «не жест»).
+// ---------------------------------------------------------------------------
+const HOLISTIC_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/holistic@0.5.1675471629';
+/** Не чаще 30 кадров в секунду: камера отдаёт 30, лишний send положил бы в окно дубли одного кадра. */
+const SEND_MIN_INTERVAL_MS = 33;
+const PRED_EVERY = 15;           // кадров между предсказаниями
+const BUFFER_MAX = SEQ_LEN * 2;  // буфер кадров; окно берёт последние 60
+const ACCEPT_P = 0.25;           // top-1 не ниже…
+const ACCEPT_RATIO = 1.8;        // …и во столько раз выше второго места
+const LOCK_REPEATS = 2;          // принятых замеров подряд, чтобы слово встало во фразу
+const COOLDOWN_MS = 1200;        // пауза между словами фразы
+/** Ниже этой частоты окно из 60 кадров растягивается во времени — предупреждаем, как стенд. */
+const FPS_LOW = 12;
 
 // ---------------------------------------------------------------------------
 // Стабилизация лэндмарков (src/lib/landmarkStabilizer.ts) — слой между
@@ -112,6 +95,117 @@ function alphaOf(set: StabilizedSet): number {
   return 1;
 }
 
+// ---------------------------------------------------------------------------
+// Цифровой скелет, как на стенде: только скелет на тёмном фоне, без кадра
+// камеры (стиль референса SL2T) — контуры лица и зрачки, поза до пояса, левая
+// кисть жёлтая, правая розовая. Сам кадр камеры — маленьким окошком в углу.
+// ---------------------------------------------------------------------------
+const SKELETON_BG = '#07090f';
+const POSE_COLOR = '#cdd6e4';
+const FACE_COLOR = '#39c5ff';
+const FACE_DOT_COLOR = '#bfe9ff';
+const LEFT_HAND_COLOR = '#ffcf33';
+const RIGHT_HAND_COLOR = '#ff4fd8';
+const JOINT_COLOR = '#eaf2ff';
+/** Сглаживание отображения лица (стабилизатор лицо не трогает). */
+const FACE_SMOOTH_A = 0.55;
+
+type Pt = { x: number; y: number };
+type Pairs = ReadonlyArray<readonly [number, number]>;
+
+const UPPER_POSE: Pairs = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24]];
+/** Кисть: если сборка holistic не отдала HAND_CONNECTIONS, те же 21 связь вручную. */
+const HAND_PAIRS: Pairs = (HAND_CONNECTIONS as Pairs | undefined) ?? [
+  [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11],
+  [11, 12], [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20],
+];
+/** Переносица 168→4 и крылья носа — в holistic нет готового набора. */
+const NOSE_LINES: Pairs = [[168, 6], [6, 197], [197, 195], [195, 5], [5, 4], [4, 98], [4, 327], [98, 97], [327, 326]];
+const FACE_SETS: Pairs[] = [
+  FACEMESH_FACE_OVAL, FACEMESH_LIPS, FACEMESH_LEFT_EYE, FACEMESH_RIGHT_EYE,
+  FACEMESH_LEFT_EYEBROW, FACEMESH_RIGHT_EYEBROW, FACEMESH_LEFT_IRIS, FACEMESH_RIGHT_IRIS,
+  NOSE_LINES,
+].filter(Boolean) as Pairs[];
+/** Точки лица, обведённые кружками, — все концы линий выше. */
+const FACE_DOT_IDX = [...new Set(FACE_SETS.flatMap((set) => set.flatMap(([a, b]) => [a, b])))];
+
+function strokePairs(
+  ctx: CanvasRenderingContext2D,
+  pts: ReadonlyArray<Pt | undefined> | null | undefined,
+  pairs: Pairs,
+  color: string,
+  width: number,
+  alpha = 1,
+) {
+  if (!pts) return;
+  const { width: w, height: h } = ctx.canvas;
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  for (const [a, b] of pairs) {
+    const p = pts[a];
+    const q = pts[b];
+    if (!p || !q) continue;
+    ctx.moveTo(p.x * w, p.y * h);
+    ctx.lineTo(q.x * w, q.y * h);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function fillDots(ctx: CanvasRenderingContext2D, pts: ReadonlyArray<Pt | undefined>, color: string, r: number, alpha = 1) {
+  const { width: w, height: h } = ctx.canvas;
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  for (const p of pts) {
+    if (!p) continue;
+    ctx.beginPath();
+    ctx.arc(p.x * w, p.y * h, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHand(ctx: CanvasRenderingContext2D, lms: Pt[] | undefined, color: string, alpha: number, width = 2.5) {
+  if (!lms || alpha <= 0) return;
+  strokePairs(ctx, lms, HAND_PAIRS, color, width, alpha);
+  fillDots(ctx, lms, width < 2 ? color : JOINT_COLOR, width < 2 ? 1.3 : 2, alpha);
+}
+
+/** Кадр скелета: s.results — стабилизированные точки, s.raw — сырые (для отладки). */
+function drawSkeleton(ctx: CanvasRenderingContext2D, s: StabilizedHolistic<any>, face: { prev: Pt[] | null }) {
+  const res = s.results;
+  ctx.fillStyle = SKELETON_BG;
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  const pose: Pt[] | undefined = res.poseLandmarks;
+  strokePairs(ctx, pose, UPPER_POSE, POSE_COLOR, 1.5, 0.85);
+  if (pose) fillDots(ctx, [pose[11], pose[12], pose[13], pose[14], pose[23], pose[24]], POSE_COLOR, 2.5, 0.9);
+
+  if (res.faceLandmarks) {
+    const prev = face.prev;
+    const pts: Pt[] = res.faceLandmarks.map((p: Pt, i: number) => (prev && prev[i]
+      ? { x: FACE_SMOOTH_A * prev[i].x + (1 - FACE_SMOOTH_A) * p.x, y: FACE_SMOOTH_A * prev[i].y + (1 - FACE_SMOOTH_A) * p.y }
+      : { x: p.x, y: p.y }));
+    face.prev = pts;
+    for (const set of FACE_SETS) strokePairs(ctx, pts, set, FACE_COLOR, 1.1, 0.9);
+    fillDots(ctx, FACE_DOT_IDX.map((i) => pts[i]), FACE_DOT_COLOR, 1.3, 0.95);
+  } else {
+    face.prev = null;
+  }
+
+  drawHand(ctx, res.leftHandLandmarks, LEFT_HAND_COLOR, alphaOf(s.left));
+  drawHand(ctx, res.rightHandLandmarks, RIGHT_HAND_COLOR, alphaOf(s.right));
+
+  // Отладка: сырые точки трекера поверх сглаженных — видно и дрожь, и лаг
+  // фильтра, и отброшенные скачки.
+  if (DEBUG_RAW_LANDMARKS) {
+    drawHand(ctx, s.raw.leftHandLandmarks, DEBUG_RAW_COLOR, 0.8, 1);
+    drawHand(ctx, s.raw.rightHandLandmarks, DEBUG_RAW_COLOR, 0.8, 1);
+  }
+}
+
 const PIPELINE_STAGES = [
   { id: 'hand', labelKey: 'recognizer.stage.hand', icon: '✋', enabled: true },
   { id: 'emotion', labelKey: 'recognizer.stage.emotion', icon: '😊', enabled: false },
@@ -119,42 +213,19 @@ const PIPELINE_STAGES = [
   { id: 'voice', labelKey: 'recognizer.stage.voice', icon: '🔊', enabled: true },
 ] as const;
 
-/**
- * Краски разметки поверх видео.
- *
- * Canvas принимает только готовую строку цвета, var(--token) в него не
- * передашь, поэтому токены читаем с <html> и держим в ref. Раньше здесь были
- * зашиты жёлтый скелет и белая сетка лица: на светлом кадре белое по белому
- * пропадало полностью.
- */
-function readOverlayPaint() {
-  const css = getComputedStyle(document.documentElement);
-  const token = (name: string) => css.getPropertyValue(name).trim();
-  return {
-    /** Вуаль поверх кадра: в тёмной теме гасит, в светлой засветляет. */
-    veil: token('--bg'),
-    /** Сетка лица — цветом текста темы, он по определению контрастен фону. */
-    face: token('--text'),
-    /** Скелет позы — тёплый акцент с логотипа, читается и на светлом кадре. */
-    pose: token('--warm'),
-  };
-}
-
 interface RecognizerPageProps {
   onBack: () => void;
 }
 
 export function RecognizerPage({ onBack }: RecognizerPageProps) {
   const t = useT();
-  const { theme } = useTheme();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  /** Память порядка отрисовки кистей — без неё он мерцает при сближении. */
-  const overlayStateRef = useRef<OverlayState>({});
   /** Стабилизатор лэндмарков — один на страницу, хранит состояние фильтров между кадрами. */
   const stabilizerRef = useRef<HolisticStabilizer | null>(null);
   if (!stabilizerRef.current) stabilizerRef.current = new HolisticStabilizer({ ...STABILIZER_CONFIG });
-  const paintRef = useRef({ veil: '', face: '', pose: '' });
+  /** Сглаженные точки лица прошлого кадра — только для отрисовки. */
+  const faceDrawRef = useRef<{ prev: Pt[] | null }>({ prev: null });
   const holisticRef = useRef<any>(null);
   const framesBufferRef = useRef<{ t: number; frame: Float32Array }[]>([]);
   const animFrameRef = useRef<number>(0);
@@ -162,38 +233,50 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
   const isRunningRef = useRef(false);
   const predictRef = useRef<typeof predict | null>(null);
 
-  // Wall-clock capture + EMA decision state
+  // Кадры и решение — как на стенде
   const lastSendAtRef = useRef<number>(0);
   const inFlightRef = useRef(false);
-  const smoothedRef = useRef<Float32Array | null>(null);
-  const candidateRef = useRef<{ word: number; ticks: number }>({ word: -1, ticks: 0 });
-  const blockedWordRef = useRef<number>(-1); // committed word index, blocked until re-armed (new model)
-  const lastChipAddedAtRef = useRef<number>(0);
+  /** Кадров обработано с запуска камеры: предсказание — на каждом PRED_EVERY-м. */
+  const frameNoRef = useRef(0);
+  /** Замок фразы: слово, сколько раз подряд принято, время последнего добавления, была ли пауза. */
+  const lockRef = useRef<{ word: string | null; count: number; lastAppend: number; gap: boolean }>({
+    word: null, count: 0, lastAppend: 0, gap: true,
+  });
+  /** Слова фразы — синхронно с collectedWords, чтобы решать без ожидания рендера. */
+  const collectedRef = useRef<string[]>([]);
+  /** Счётчик частоты MediaPipe: начало секунды и кадров в ней. */
+  const fpsRef = useRef<{ t0: number; n: number }>({ t0: 0, n: 0 });
 
   const [isRunning, setIsRunning] = useState(false);
   const [currentPrediction, setCurrentPrediction] = useState<string | null>(null);
-  const [confidence, setConfidence] = useState(0);
+  const [, setConfidence] = useState(0);
   const [topPredictions, setTopPredictions] = useState<{ label: string; confidence: number }[]>([]);
   const [history, setHistory] = useState<{ word: string; confidence: number; time: string }[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
   const [holisticReady, setHolisticReady] = useState(false);
+  /** MediaPipe не запустился ни с уточнением лица, ни без него. */
+  const [trackerFailed, setTrackerFailed] = useState(false);
+  /** Уточнение лица (зрачки, губы) включилось — как на стенде; в Safari без него. */
+  const [faceRefine, setFaceRefine] = useState(false);
   // Режим ASL-дактиля: отдельная лёгкая голова A-Z вместо основной модели.
   const [aslMode, setAslMode] = useState(false);
   const aslModeRef = useRef(false);
   const aslRef = useRef<AslDactyl | null>(null);
-  const [status, setStatus] = useState('Loading model...');
   const [frameCount, setFrameCount] = useState(0);
+  /** Частота MediaPipe за последнюю секунду и видны ли руки — как строка состояния стенда. */
+  const [fpsInfo, setFpsInfo] = useState<{ fps: number; hands: boolean } | null>(null);
   const [mirrored, setMirrored] = useState(false);
   const mirroredRef = useRef(false);
+  /** Озвучивать каждое принятое слово — на стенде включено по умолчанию. */
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const autoSpeakRef = useRef(true);
   const [debugMode, setDebugMode] = useState(false);
 
   // New: word chips accumulator + locking-in indicator
   const [collectedWords, setCollectedWords] = useState<string[]>([]);
   /**
-   * Top-5 на момент коммита — ряд чипов-кандидатов под фразой.
-   *
-   * Зачем: честный top-1 модели 60.2%, а top-5 — 87.2%. Модель почти всегда
-   * ВИДИТ верное слово, но не всегда ставит его первым. Тап по чипу заменяет
+   * Top-5 на момент коммита — ряд чипов-кандидатов под фразой. Модель часто
+   * видит верное слово, но не ставит его первым: тап по чипу заменяет
    * последнее слово фразы — из «угадала или нет» получается «выбери за один
    * тап». Выбранный вариант подсвечен; тап по другому — переключение.
    */
@@ -203,92 +286,54 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
   const [activeStage, setActiveStage] = useState<'hand' | 'emotion' | 'llm' | 'voice'>('hand');
 
   const { speak, cancel: cancelSpeech, isSpeaking, supported: ttsSupported } = useSpeech();
-
-  /**
-   * Словарь площадки, `?vocab=counter_lean`.
-   *
-   * По умолчанию ограничения НЕТ, и это осознанно. Сужение словаря до двух
-   * сотен знаков поднимает точность на невиданных подписантах с 58.5% до
-   * 80.9% — но только когда показывают знаки ИЗ этого словаря. На публичной
-   * демо-странице человек показывает что угодно, и ограничение там сделает
-   * хуже: верный ответ окажется вычеркнут. Ограничение включается там, где
-   * набор знаков заранее известен: регистратура, ЦОН, отделение банка.
-   * Список — public/model/vocabularies.json, измерения — ml/vocab_experiment.py.
-   */
-  const vocabulary = useMemo(
-    () => new URLSearchParams(window.location.search).get('vocab') || undefined,
-    [],
-  );
-
-  const [signModel, setSignModel] = useState<SignModelId>(initialSignModel);
+  const speakRef = useRef(speak);
   useEffect(() => {
-    try { localStorage.setItem(SIGN_MODEL_KEY, signModel); } catch { /* ignore */ }
-  }, [signModel]);
-  const decisionRef = useRef(DECISION[signModel]);
-  useEffect(() => {
-    decisionRef.current = DECISION[signModel];
-    // другая модель — другие классы: сглаживание и кандидаты начинаем заново
-    smoothedRef.current = null;
-    candidateRef.current = { word: -1, ticks: 0 };
-    blockedWordRef.current = -1;
-    setTopPredictions([]);
-    setLockingWord(null);
-    setLockingProgress(0);
-  }, [signModel]);
+    speakRef.current = speak;
+  }, [speak]);
 
-  const { predict, isLoaded, isLoading, error, labels, numClasses, featuresPerFrame, progress, labelMap, idxToLabel, vocabSize } = useSignModel({ vocabulary, model: signModel });
+  const { predict, isLoaded, isLoading, error, labels, numClasses, featuresPerFrame, progress, labelMap, idxToLabel } = useSignModel();
   /**
-   * Модель весит ~8 МБ: без процента «Loading» читается как «зависло».
+   * Три сети весят ~21 МБ: без процента «Loading» читается как «зависло».
    * Пока прогресс нулевой (идут заголовки, отдача ещё не началась) процент не
    * пишем — «0%» выглядит хуже, чем просто «Loading».
    */
   const percent = Math.round(progress * 100);
   const loadingLabel = percent > 0 ? `${t('common.loading')} ${percent}%` : t('common.loading');
-
-  // Токены темы читаем на следующем кадре: провайдер выставляет data-theme в
-  // своём эффекте, а он идёт ПОСЛЕ эффектов детей — без rAF взяли бы старую тему.
-  useEffect(() => {
-    const id = requestAnimationFrame(() => { paintRef.current = readOverlayPaint(); });
-    return () => cancelAnimationFrame(id);
-  }, [theme]);
+  const signLabels = labels.filter((l) => l !== 'no_event');
 
   // Keep predict ref in sync
   useEffect(() => {
     predictRef.current = predict;
   }, [predict]);
 
-  // Keep mirrored ref in sync with state
+  // Keep mirrored / autoSpeak / phrase refs in sync with state
   useEffect(() => {
     mirroredRef.current = mirrored;
   }, [mirrored]);
-
-  // Keep model metadata refs in sync (used inside the prediction tick)
-  const featuresRef = useRef<number>(FEATURES);
   useEffect(() => {
-    featuresRef.current = featuresPerFrame;
-  }, [featuresPerFrame]);
+    autoSpeakRef.current = autoSpeak;
+  }, [autoSpeak]);
+  useEffect(() => {
+    collectedRef.current = collectedWords;
+  }, [collectedWords]);
+
   const idxToLabelRef = useRef<Record<number, string>>({});
   useEffect(() => {
     idxToLabelRef.current = idxToLabel;
   }, [idxToLabel]);
-  const noEventIdxRef = useRef(-1);
-  useEffect(() => {
-    noEventIdxRef.current = typeof labelMap['no_event'] === 'number' ? labelMap['no_event'] : -1;
-  }, [labelMap]);
 
   // Model card stats from <base>/model_config.json (optional)
   const [modelConfig, setModelConfig] = useState<{ accuracy?: number; architecture?: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setModelConfig(null);
-    fetch(`${SIGN_MODELS[signModel].base}/model_config.json`)
+    fetch(`${QYRAN_MODEL.base}/model_config.json`)
       .then(r => (r.ok ? r.json() : null))
       .then(cfg => {
         if (!cancelled && cfg && typeof cfg === 'object') setModelConfig(cfg);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [signModel]);
+  }, []);
 
   // Extract landmarks from MediaPipe results
   const extractLandmarks = useCallback((results: any): number[] => {
@@ -354,135 +399,84 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
     return frame;
   }, []);
 
-  // One prediction tick (wall-clock driven): resample the rolling landmark
-  // buffer to a fixed 60-frame window, run inference, update EMA-smoothed
-  // probabilities and the display/commit decision state.
-  const predictionTick = useCallback(async () => {
+  /** Сбросить замок фразы и индикатор — после старта, стопа, смены режима. */
+  const resetDecision = useCallback(() => {
+    lockRef.current = { word: null, count: 0, lastAppend: lockRef.current.lastAppend, gap: true };
+    setLockingWord(null);
+    setLockingProgress(0);
+  }, []);
+
+  // Одно предсказание — как predict() + renderBars() + updateSentence() стенда:
+  // последние 60 кадров → признаки → ансамбль → решение по сырым вероятностям.
+  const runPrediction = useCallback(async () => {
     // В режиме ASL основная модель молчит — работает ASL-тикер ниже.
     if (aslModeRef.current) return;
     if (!isRunningRef.current || inFlightRef.current || !predictRef.current) return;
-
-    const frames = resampleWindow(framesBufferRef.current, performance.now(), WINDOW_MS, SEQ_LEN);
-    if (!frames) return; // not enough recent frames yet
+    const buf = framesBufferRef.current;
+    if (buf.length < SEQ_LEN) return;
+    const frames = buf.slice(-SEQ_LEN).map((e) => e.frame);
 
     inFlightRef.current = true;
     try {
-      // v2 (319): канонизация + реляционный блок; v1 (259): только канонизация;
-      // legacy (255): сырые кадры (скейлер применяется внутри хука).
-      let flat: Float32Array;
-      if (featuresRef.current === OUT_DIM) {
-        flat = featurizeWindow(frames);
-      } else if (featuresRef.current === BASE_DIM) {
-        flat = normalizeWindow(frames);
-      } else {
-        flat = new Float32Array(SEQ_LEN * FEATURES);
-        for (let i = 0; i < frames.length; i++) flat.set(frames[i], i * FEATURES);
-      }
-
-      const result = await predictRef.current(flat);
+      const result = await predictRef.current(featurizeWindow(frames));
       if (!result || !isRunningRef.current) return;
 
-      // EMA over the full probability vector
       const probs = result.probs;
-      let s = smoothedRef.current;
-      if (!s || s.length !== probs.length) {
-        s = Float32Array.from(probs);
-        smoothedRef.current = s;
-      } else {
-        for (let i = 0; i < s.length; i++) s[i] = EMA_KEEP * s[i] + (1 - EMA_KEEP) * probs[i];
-      }
-
-      // Top-5 side panel from smoothed probabilities
       const i2l = idxToLabelRef.current;
-      const indexed = Array.from(s).map((p, i) => ({ idx: i, prob: p }));
-      indexed.sort((a, b) => b.prob - a.prob);
-      setTopPredictions(indexed.slice(0, 5).map(({ idx, prob }) => ({
-        label: i2l[idx] || `class_${idx}`,
-        confidence: prob,
-      })));
+      const order = Array.from(probs, (_, i) => i).sort((a, b) => probs[b] - probs[a]);
+      const top = order.slice(0, 5).map((i) => ({ label: i2l[i] || `class_${i}`, confidence: probs[i] }));
+      setTopPredictions(top);
 
-      const noEventIdx = noEventIdxRef.current;
-      const hasNoEvent = noEventIdx >= 0 && noEventIdx < s.length;
+      // Порог стенда: абсолютный 0.5 был подобран под 54 класса; при 240
+      // классах softmax редко даёт больше 0.3 даже на верном ответе. Поэтому
+      // top-1 ≥ ACCEPT_P и отрыв от второго места (любого, включая no_event).
+      const best = order[0];
+      const pBest = probs[best];
+      const pSecond = order.length > 1 ? probs[order[1]] : 0;
+      const label = i2l[best] || `class_${best}`;
+      const isSign = label !== 'no_event' && pBest >= ACCEPT_P && pBest >= ACCEPT_RATIO * Math.max(pSecond, 1e-6);
 
-      // Argmax (excluding no_event when the model has that class) + второе место для правила отрыва
-      let word = -1;
-      let best = -Infinity;
-      let second = 0;
-      for (let i = 0; i < s.length; i++) {
-        if (hasNoEvent && i === noEventIdx) continue;
-        if (s[i] > best) { second = Math.max(second, best); best = s[i]; word = i; }
-        else if (s[i] > second) second = s[i];
-      }
-      if (word < 0) return;
-      const label = i2l[word] || `class_${word}`;
-      const noEv = hasNoEvent ? s[noEventIdx] : 0;
-
-      // Re-arm after a commit once no_event dominates for one tick
-      if (hasNoEvent && blockedWordRef.current !== -1 && noEv > REARM_NO_EVENT) {
-        blockedWordRef.current = -1;
-      }
-
-      const dec = decisionRef.current;
-      const quietOk = !hasNoEvent || (dec.noEventMax === 'beat' ? best > noEv : noEv <= dec.noEventMax);
-      const displayOk = best >= dec.display && best >= dec.ratio * second && quietOk;
-      const commitLevel = hasNoEvent ? dec.commit : OLD_COMMIT_THRESHOLD;
-
-      if (displayOk && word !== blockedWordRef.current) {
-        // A different qualifying word also re-arms
-        blockedWordRef.current = -1;
-        setLockingWord(label);
-
-        const cand = candidateRef.current;
-        if (best >= commitLevel) {
-          if (cand.word === word) cand.ticks += 1;
-          else { cand.word = word; cand.ticks = 1; }
-        } else {
-          cand.word = word;
-          cand.ticks = 0;
-        }
-        setLockingProgress(Math.min(cand.ticks / COMMIT_TICKS, 1));
-
-        if (cand.ticks >= COMMIT_TICKS) {
-          // Commit a chip
-          const now = Date.now();
-          if (hasNoEvent) {
-            setCollectedWords(prev => [...prev, label]);
-            lastChipAddedAtRef.current = now;
-            blockedWordRef.current = word; // block repeats until re-armed
-            // top-5 в момент коммита — кандидаты на замену последнего слова
-            setAltChoices(
-              indexed
-                .filter(({ idx }) => idx !== noEventIdx)
-                .slice(0, 5)
-                .map(({ idx, prob }) => ({ label: i2l[idx] || `class_${idx}`, confidence: prob })),
-            );
-          } else {
-            // Legacy model: same-word-in-a-row guard + global cooldown
-            setCollectedWords(prev => {
-              if (prev[prev.length - 1] === label) return prev;
-              if (now - lastChipAddedAtRef.current < CHIP_COOLDOWN_MS) return prev;
-              lastChipAddedAtRef.current = now;
-              return [...prev, label];
-            });
-          }
-          setCurrentPrediction(label);
-          setConfidence(best);
-          setHistory(prev => [
-            { word: label, confidence: best, time: new Date().toLocaleTimeString() },
-            ...prev.slice(0, 9),
-          ]);
-          candidateRef.current = { word: -1, ticks: 0 };
-          smoothedRef.current = null; // reset EMA after each committed chip
-          setLockingWord(null);
-          setLockingProgress(0);
-        }
-      } else {
-        candidateRef.current = { word: -1, ticks: 0 };
+      const lock = lockRef.current;
+      if (!isSign) {
+        // нет жеста — сброс замка; пауза разрешает повторить то же слово
+        lock.word = null;
+        lock.count = 0;
+        lock.gap = true;
         setLockingWord(null);
         setLockingProgress(0);
         setCurrentPrediction(null);
         setConfidence(0);
+        return;
       }
+
+      if (label === lock.word) lock.count += 1;
+      else { lock.word = label; lock.count = 1; }
+      setLockingWord(label);
+      setLockingProgress(Math.min(lock.count / LOCK_REPEATS, 1));
+      if (lock.count < LOCK_REPEATS) return;
+
+      const now = Date.now();
+      if (now - lock.lastAppend < COOLDOWN_MS) return;
+      const words = collectedRef.current;
+      if (words[words.length - 1] === label && !lock.gap) return; // то же слово без паузы — дубль
+
+      const next = [...words, label];
+      collectedRef.current = next;
+      setCollectedWords(next);
+      lock.lastAppend = now;
+      lock.count = 0;
+      lock.gap = false;
+      // top-5 в момент коммита — кандидаты на замену последнего слова
+      setAltChoices(top.filter((c) => c.label !== 'no_event'));
+      setCurrentPrediction(label);
+      setConfidence(pBest);
+      setHistory(prev => [
+        { word: label, confidence: pBest, time: new Date().toLocaleTimeString() },
+        ...prev.slice(0, 9),
+      ]);
+      setLockingWord(null);
+      setLockingProgress(0);
+      if (autoSpeakRef.current) speakRef.current(label);
     } finally {
       inFlightRef.current = false;
     }
@@ -492,177 +486,100 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
   useEffect(() => {
     let cancelled = false;
 
+    const onResults = (results: any) => {
+      if (!isRunningRef.current) return;
+      const now = performance.now();
+
+      // Частота MediaPipe раз в секунду — на слабом ноутбуке окно из 60 кадров
+      // растягивается во времени, и об этом надо сказать, а не молчать.
+      const f = fpsRef.current;
+      if (!f.t0) f.t0 = now;
+      f.n += 1;
+      if (now - f.t0 >= 1000) {
+        setFpsInfo({ fps: (f.n * 1000) / (now - f.t0), hands: !!(results.leftHandLandmarks || results.rightHandLandmarks) });
+        f.t0 = now;
+        f.n = 0;
+      }
+
+      // Стабилизатор считаем всегда (чтобы фильтры не «холодели») — для картинки;
+      // модель видит сырые точки (STABILIZE_MODEL_INPUT), как при обучении и на стенде.
+      const s = stabilizerRef.current!.update(results, now);
+      const buf = framesBufferRef.current;
+      buf.push({ t: now, frame: Float32Array.from(extractLandmarks(STABILIZE_MODEL_INPUT ? s.results : results)) });
+      if (buf.length > BUFFER_MAX) buf.splice(0, SEQ_LEN);
+      setFrameCount(Math.min(buf.length, SEQ_LEN));
+      frameNoRef.current += 1;
+      if (buf.length >= SEQ_LEN && frameNoRef.current % PRED_EVERY === 0) void runPrediction();
+
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (canvas && video) {
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 480;
+        // размер меняем только при смене — присваивание width сбрасывает холст
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (ctx) drawSkeleton(ctx, s, faceDrawRef.current);
+      }
+    };
+
     async function initHolistic() {
       try {
         // @ts-ignore - MediaPipe loaded via npm
         const { Holistic } = await import('@mediapipe/holistic');
 
-        const holistic = new Holistic({
-          locateFile: (file: string) =>
-            `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`,
-        });
+        const make = (refine: boolean) => {
+          const holistic = new Holistic({
+            locateFile: (file: string) => `${HOLISTIC_CDN}/${file}`,
+          });
+          holistic.setOptions({
+            modelComplexity: 1,
+            // Своё сглаживание MediaPipe выключено, как на стенде: картинку
+            // сглаживает landmarkStabilizer, два фильтра подряд только добавляют лаг.
+            smoothLandmarks: false,
+            refineFaceLandmarks: refine,
+            minDetectionConfidence: 0.3,
+            minTrackingConfidence: 0.3,
+          });
+          holistic.onResults(onResults);
+          return holistic;
+        };
 
-        holistic.setOptions({
-          modelComplexity: 1,
-          // Своё сглаживание выключено: иначе оно складывается с One Euro
-          // из landmarkStabilizer и лаг удваивается.
-          smoothLandmarks: false,
-          minDetectionConfidence: 0.3,
-          minTrackingConfidence: 0.3,
-        });
-
-        holistic.onResults((results: any) => {
-          if (!isRunningRef.current) return;
-
-          const now = performance.now();
-          // Стабилизация — только для отрисовки; модель видит сырые точки
-          // (STABILIZE_MODEL_INPUT), как при обучении.
-          const s = stabilizerRef.current!.update(results, now);
-          const landmarks = extractLandmarks(STABILIZE_MODEL_INPUT ? s.results : results);
-          const buf = framesBufferRef.current;
-          buf.push({ t: now, frame: Float32Array.from(landmarks) });
-          // Evict entries older than the rolling buffer horizon
-          const cutoff = now - BUFFER_MS;
-          while (buf.length > 0 && buf[0].t < cutoff) buf.shift();
-          setFrameCount(Math.min(buf.length, SEQ_LEN));
-
-          // Draw on canvas — skeleton style (like the demo)
-          const canvas = canvasRef.current;
-          const video = videoRef.current;
-          if (canvas && video) {
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-
-              // Base video frame
-              ctx.save();
-              ctx.drawImage(video, 0, 0);
-
-              // Прозрачность задаём globalAlpha, а не цветом: в токене лежит
-              // сплошной цвет темы, полупрозрачных вариантов на каждый случай нет.
-              const paint = paintRef.current;
-
-              // Subtle overlay so landmarks pop
-              ctx.save();
-              ctx.globalAlpha = 0.15;
-              ctx.fillStyle = paint.veil;
-              ctx.fillRect(0, 0, canvas.width, canvas.height);
-              ctx.restore();
-
-              // Face mesh tessellation — translucent web
-              if (results.faceLandmarks && FACEMESH_TESSELATION) {
-                ctx.save();
-                ctx.globalAlpha = 0.22;
-                drawConnectors(ctx, results.faceLandmarks, FACEMESH_TESSELATION, {
-                  color: paint.face,
-                  lineWidth: 0.5,
-                });
-                ctx.restore();
-              }
-
-              // Pose skeleton — из стабилизатора (при потере трекинга
-              // затухает вместе с alpha, а не пропадает рывком).
-              const drawn = s.results;
-              if (drawn.poseLandmarks && POSE_CONNECTIONS) {
-                const poseAlpha = alphaOf(s.pose);
-                // Стабилизатор отдаёт точки без visibility, а drawing_utils
-                // по ней прячет додуманные суставы (ноги за кадром и т.п.,
-                // visibilityMin 0.5). Возвращаем visibility из сырой позы,
-                // иначе рисуются все 33 точки, включая выдуманные.
-                const rawPose = s.raw.poseLandmarks;
-                const posePts = rawPose
-                  ? drawn.poseLandmarks.map((p: any, i: number) => ({ ...p, visibility: rawPose[i]?.visibility }))
-                  : drawn.poseLandmarks;
-                ctx.save();
-                ctx.globalAlpha = 0.6 * poseAlpha;
-                drawConnectors(ctx, posePts, POSE_CONNECTIONS, {
-                  color: paint.pose,
-                  lineWidth: 2,
-                });
-                ctx.restore();
-                ctx.save();
-                ctx.globalAlpha = poseAlpha;
-                drawLandmarks(ctx, posePts, {
-                  color: paint.pose,
-                  fillColor: paint.pose,
-                  lineWidth: 1,
-                  radius: 2,
-                });
-                ctx.restore();
-              }
-
-              // Кисти — общей отрисовкой со студией: своя краска на сторону,
-              // тёмная обводка и порядок по глубине.
-              //
-              // Раньше здесь обе кисти рисовались ОДНИМ оранжевым (вопреки
-              // соседнему комментарию, обещавшему разные цвета), непрозрачными
-              // кружками r=4 с ореолом, причём правая всегда поверх левой. При
-              // сведённых кистях соседние точки разных рук отстоят в среднем на
-              // 6 px — меньше диаметра маркера, поэтому верхняя рука буквально
-              // закрашивала нижнюю, и та пропадала.
-              //
-              // arms: false — скелет позы здесь свой, рисуется выше.
-              //
-              // Кисти берём из стабилизатора. Прозрачность — по статусу:
-              // предсказанная (трекер не вернул) — EXTRAPOLATED_ALPHA,
-              // затухающая — alpha из стабилизатора. Если у кистей она
-              // разная, рисуем их двумя вызовами по одной кисти.
-              const alphaL = alphaOf(s.left);
-              const alphaR = alphaOf(s.right);
-              const drawHands = (frame: typeof drawn, alpha: number) => {
-                ctx.save();
-                ctx.globalAlpha = alpha;
-                drawTrackedSkeleton(ctx, frame, canvas.width, canvas.height, {
-                  arms: false,
-                  state: overlayStateRef.current,
-                });
-                ctx.restore();
-              };
-              if (alphaL === alphaR) {
-                drawHands(drawn, alphaL);
-              } else {
-                // дальняя кисть первой, ближняя поверх — как внутри drawTrackedSkeleton
-                const onlyLeft = { ...drawn, rightHandLandmarks: undefined };
-                const onlyRight = { ...drawn, leftHandLandmarks: undefined };
-                if ((overlayStateRef.current.nearSide ?? 'right') === 'left') {
-                  drawHands(onlyRight, alphaR);
-                  drawHands(onlyLeft, alphaL);
-                } else {
-                  drawHands(onlyLeft, alphaL);
-                  drawHands(onlyRight, alphaR);
-                }
-              }
-
-              // Отладка: сырые точки трекера поверх сглаженных — видно и
-              // дрожь, и лаг фильтра, и отброшенные скачки.
-              if (DEBUG_RAW_LANDMARKS && HAND_CONNECTIONS) {
-                ctx.save();
-                ctx.globalAlpha = 0.8;
-                for (const pts of [s.raw.leftHandLandmarks, s.raw.rightHandLandmarks]) {
-                  if (!pts) continue;
-                  drawConnectors(ctx, pts, HAND_CONNECTIONS, { color: DEBUG_RAW_COLOR, lineWidth: 1 });
-                  drawLandmarks(ctx, pts, { color: DEBUG_RAW_COLOR, fillColor: DEBUG_RAW_COLOR, lineWidth: 1, radius: 2 });
-                }
-                ctx.restore();
-              }
-
-              ctx.restore();
-            }
+        // Как на стенде: сначала с уточнением лица, но с таймаутом и откатом —
+        // Safari на уточнении (attention-модель лица) зависает, там сразу без него.
+        const tryInit = async (refine: boolean, ms: number) => {
+          const holistic = make(refine);
+          const ok = await Promise.race([
+            holistic.initialize().then(() => true).catch((e: unknown) => { console.error('[Qyran] Holistic init:', e); return false; }),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms)),
+          ]);
+          if (!ok) {
+            holistic.close().catch(() => {});
+            return null;
           }
-        });
+          return { holistic, refine };
+        };
 
-        if (!cancelled) {
-          holisticRef.current = holistic;
-          setHolisticReady(true);
-          setStatus('Ready');
-          console.log('[Qyran] MediaPipe Holistic initialized');
+        const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome|Chromium|Edg/.test(navigator.userAgent);
+        let got = isSafari ? null : await tryInit(true, 25000);
+        if (!got && !cancelled) got = await tryInit(false, 40000);
+
+        if (cancelled) {
+          got?.holistic.close().catch(() => {});
+          return;
         }
+        if (!got) {
+          setTrackerFailed(true);
+          return;
+        }
+        holisticRef.current = got.holistic;
+        setFaceRefine(got.refine);
+        setHolisticReady(true);
+        console.log(`[Qyran] MediaPipe Holistic initialized (refineFaceLandmarks: ${got.refine})`);
       } catch (err: any) {
         console.error('[Qyran] Holistic init error:', err);
-        if (!cancelled) {
-          setStatus(`Holistic error: ${err.message}`);
-        }
+        if (!cancelled) setTrackerFailed(true);
       }
     }
 
@@ -679,8 +596,6 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
     async function processFrame() {
       if (!running || !videoRef.current || !holisticRef.current) return;
       if (videoRef.current.readyState >= 2) {
-        // Throttle: successive holistic.send calls >= SEND_MIN_INTERVAL_MS apart
-        // (skip rAF ticks in between so window content is display-Hz independent)
         const now = performance.now();
         if (now - lastSendAtRef.current >= SEND_MIN_INTERVAL_MS) {
           lastSendAtRef.current = now;
@@ -704,14 +619,6 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
     };
   }, [isRunning, cameraReady, holisticReady]);
 
-  // Predictions fire on a wall-clock interval, NOT on frame counts.
-  // Started with the camera, cleaned up on stop/unmount.
-  useEffect(() => {
-    if (!isRunning) return;
-    const id = window.setInterval(() => { predictionTick(); }, PREDICT_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [isRunning, predictionTick]);
-
   // Синхронизация режима ASL + ленивая загрузка головы при первом включении.
   useEffect(() => {
     aslModeRef.current = aslMode;
@@ -722,13 +629,10 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
         .catch((e) => console.error('ASL model load failed', e));
     }
     // Смена режима сбрасывает решающее состояние основной модели.
-    smoothedRef.current = null;
-    candidateRef.current = { word: -1, ticks: 0 };
-    setLockingWord(null);
-    setLockingProgress(0);
+    resetDecision();
     setCurrentPrediction(null);
     setTopPredictions([]);
-  }, [aslMode]);
+  }, [aslMode, resetDecision]);
 
   // ASL-тикер: буквы решаются чаще слов (~7 раз/с) — конфигурация статична,
   // окно в 60 кадров не нужно, берём последний свежий кадр.
@@ -771,8 +675,6 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        // frameRate: 30 кадров достаточно для сглаживания, 60 — если камера
-        // умеет (меньше dt → меньше порог скачка и точнее скорость).
         video: { width: 640, height: 480, facingMode: 'user', frameRate: { ideal: 30, max: 60 } },
       });
       streamRef.current = stream;
@@ -783,7 +685,6 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
       }
     } catch (err) {
       console.error('Camera error:', err);
-      setStatus('Camera access denied');
     }
   }, []);
 
@@ -806,27 +707,28 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
       stopCamera();
       framesBufferRef.current = [];
       setFrameCount(0);
-      setLockingWord(null);
-      setLockingProgress(0);
-      smoothedRef.current = null;
-      candidateRef.current = { word: -1, ticks: 0 };
-      blockedWordRef.current = -1;
+      setFpsInfo(null);
+      resetDecision();
       inFlightRef.current = false;
+      // Остановленная камера — пустой экран, а не последний кадр скелета.
+      const canvas = canvasRef.current;
+      canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
     } else {
       await startCamera();
       stabilizerRef.current?.reset();
+      faceDrawRef.current.prev = null;
       framesBufferRef.current = [];
+      frameNoRef.current = 0;
+      fpsRef.current = { t0: 0, n: 0 };
       setFrameCount(0);
       setCurrentPrediction(null);
-      smoothedRef.current = null;
-      candidateRef.current = { word: -1, ticks: 0 };
-      blockedWordRef.current = -1;
+      resetDecision();
       inFlightRef.current = false;
       lastSendAtRef.current = 0;
       isRunningRef.current = true;
       setIsRunning(true);
     }
-  }, [isRunning, startCamera, stopCamera]);
+  }, [isRunning, startCamera, stopCamera, resetDecision]);
 
   // Speak the collected sentence
   const speakSentence = useCallback(() => {
@@ -836,13 +738,12 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
 
   const clearChips = useCallback(() => {
     cancelSpeech();
+    collectedRef.current = [];
     setCollectedWords([]);
     setAltChoices([]);
+    lockRef.current = { word: null, count: 0, lastAppend: 0, gap: true };
     setLockingWord(null);
     setLockingProgress(0);
-    candidateRef.current = { word: -1, ticks: 0 };
-    blockedWordRef.current = -1;
-    lastChipAddedAtRef.current = 0;
   }, [cancelSpeech]);
 
   const removeChip = useCallback((index: number) => {
@@ -887,7 +788,7 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
           <span className={`pill ${isRunning ? 'alive' : ''}`} aria-live="polite">
             <span className="dot" />
             <span>
-              {error ? t('common.error')
+              {error || trackerFailed ? t('common.error')
                 : isLoaded && holisticReady ? (isRunning ? t('recognizer.status.recording') : t('common.ready'))
                 : isLoading ? `${loadingLabel}…`
                 : `${t('common.loading')}…`}
@@ -921,8 +822,8 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                   <span className="mono mute" style={{ fontSize: 11 }}>{frameCount}/{SEQ_LEN}</span>
                   {isLoaded && holisticReady && !error && (<span className="tag gold">● {t('common.ready')}</span>)}
                   {isLoading && (<span className="tag amber">○ {t('recognizer.tag.model')}{percent > 0 ? ` ${percent}%` : ''}</span>)}
-                  {!holisticReady && !isLoading && !error && (<span className="tag amber">○ MediaPipe</span>)}
-                  {error && (
+                  {!holisticReady && !trackerFailed && !isLoading && !error && (<span className="tag amber">○ MediaPipe</span>)}
+                  {(error || trackerFailed) && (
                     <span
                       className="tag"
                       style={{
@@ -930,7 +831,7 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                         borderColor: 'color-mix(in srgb, var(--danger) 40%, transparent)',
                         background: 'color-mix(in srgb, var(--danger) 10%, transparent)',
                       }}
-                      title={error}
+                      title={error || t('recognizer.tracker.failed')}
                     >
                       ● {t('common.error')}
                     </span>
@@ -938,14 +839,25 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                 </div>
               </div>
 
-              <div style={{ position: 'relative', aspectRatio: '16/9', background: 'var(--surface-2)' }}>
-                <video ref={videoRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'none' }} playsInline muted />
+              <div style={{ position: 'relative', aspectRatio: '16/9', background: isRunning ? SKELETON_BG : 'var(--surface-2)' }}>
+                {/* Скелет рисуется как видит себя человек — зеркально, как на стенде;
+                    на вход модели это не влияет (там своя кнопка «Зеркало»). */}
                 <canvas
                   ref={canvasRef}
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', transform: mirrored ? 'scaleX(-1)' : 'none' }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', transform: 'scaleX(-1)' }}
+                />
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  style={{
+                    position: 'absolute', right: 10, bottom: 10, width: 128, height: 96, zIndex: 15,
+                    objectFit: 'cover', borderRadius: 8, background: '#000', border: '1px solid #30363d',
+                    transform: 'scaleX(-1)', opacity: 0.85, display: isRunning ? 'block' : 'none',
+                  }}
                 />
 
-                {!isRunning && !error && (
+                {!isRunning && !error && !trackerFailed && (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, textAlign: 'center' }}>
                     <div style={{ width: 64, height: 64, borderRadius: 999, background: 'var(--accent-soft)', border: '1px solid var(--accent-line)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent)' }}>
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M17 10l4-2v8l-4-2"/></svg>
@@ -961,14 +873,14 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                   </div>
                 )}
 
-                {!isRunning && error && (
+                {!isRunning && (error || trackerFailed) && (
                   <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, textAlign: 'center' }}>
                     <div style={{ width: 64, height: 64, borderRadius: 999, background: 'color-mix(in srgb, var(--danger) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--danger) 40%, transparent)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--danger)' }}>
                       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                     </div>
                     <div style={{ maxWidth: 420 }}>
                       <div style={{ fontWeight: 500, color: 'var(--danger)' }}>{t('recognizer.error.title')}</div>
-                      <div className="dim" style={{ fontSize: 13, marginTop: 4 }}>{error}</div>
+                      <div className="dim" style={{ fontSize: 13, marginTop: 4 }}>{error || t('recognizer.tracker.failed')}</div>
                       <button onClick={() => window.location.reload()} className="btn btn-ghost" style={{ marginTop: 14, fontSize: 13 }}>
                         {t('recognizer.error.reload')}
                       </button>
@@ -1097,6 +1009,17 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                 )}
               </div>
 
+              {/* Строка состояния, как на стенде: частота MediaPipe и видны ли руки */}
+              {isRunning && fpsInfo && (
+                <div className="mono" style={{ padding: '8px 18px', fontSize: 12, borderTop: '1px solid var(--border-soft)', color: 'var(--text-dim)' }}>
+                  <span style={{ color: fpsInfo.fps >= 15 ? 'var(--accent)' : 'var(--danger)', fontWeight: 600 }}>
+                    {t('recognizer.fps', { fps: Math.round(fpsInfo.fps) })}
+                  </span>
+                  {fpsInfo.fps < FPS_LOW && <> · {t('recognizer.fps.low')}</>}
+                  {!fpsInfo.hands && <> · {t('recognizer.hands.none')}</>}
+                </div>
+              )}
+
               {/* Pipeline tabs */}
               <div style={{ padding: '14px 14px 6px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
                 {PIPELINE_STAGES.map(stage => {
@@ -1186,6 +1109,14 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                   {t('recognizer.mirror.label')}: {mirrored ? t('recognizer.toggle.on') : t('recognizer.toggle.off')}
                 </button>
                 <button
+                  onClick={() => setAutoSpeak(a => !a)}
+                  className="btn btn-ghost"
+                  style={autoSpeak ? { background: 'var(--accent-soft)', borderColor: 'var(--accent-line)', color: 'var(--accent)' } : undefined}
+                  title={t('recognizer.autoSpeak.hint')}
+                >
+                  {t('recognizer.autoSpeak.label')}: {autoSpeak ? t('recognizer.toggle.on') : t('recognizer.toggle.off')}
+                </button>
+                <button
                   onClick={() => setAslMode(a => !a)}
                   className="btn btn-ghost"
                   style={aslMode ? { background: 'var(--accent-soft)', borderColor: 'var(--accent-line)', color: 'var(--accent)' } : undefined}
@@ -1216,27 +1147,17 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
                 <div className="panel-h"><span className="num">i</span>{t('recognizer.model.title')}</div>
                 <span className={`tag ${isLoaded ? 'gold' : 'amber'}`}>{isLoaded ? t('common.ready') : isLoading ? loadingLabel : error ? t('common.error') : t('recognizer.model.waiting')}</span>
               </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }} role="radiogroup" aria-label={t('recognizer.model.title')}>
-                {(Object.keys(SIGN_MODELS) as SignModelId[]).map((id) => (
-                  <button
-                    key={id}
-                    role="radio"
-                    aria-checked={signModel === id}
-                    onClick={() => setSignModel(id)}
-                    className="btn btn-ghost"
-                    style={{ padding: '6px 12px', fontSize: 13, ...(signModel === id ? { background: 'var(--accent-soft)', borderColor: 'var(--accent-line)', color: 'var(--accent)' } : {}) }}
-                    title={t(`recognizer.model.${id}.hint`)}
-                  >
-                    {t(`recognizer.model.${id}`)}
-                  </button>
-                ))}
-              </div>
-              <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>{t(`recognizer.model.${signModel}.hint`)}</div>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{t('recognizer.model.qyran240')}</div>
+              <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>{t('recognizer.model.qyran240.hint')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
                 {[
-                  { k: t('recognizer.model.classes'), v: String(numClasses) },
+                  { k: t('recognizer.model.classes'), v: String(numClasses - (labelMap['no_event'] !== undefined ? 1 : 0)) },
                   { k: t('recognizer.model.architecture'), v: modelConfig?.architecture || 'Conv1D + BiLSTM' },
                   { k: t('recognizer.model.features'), v: `${featuresPerFrame} (Holistic)` },
+                  {
+                    k: t('recognizer.model.tracker'),
+                    v: holisticReady ? `MediaPipe Holistic${faceRefine ? ` · ${t('recognizer.tracker.refine')}` : ''}` : '…',
+                  },
                   ...(typeof modelConfig?.accuracy === 'number'
                     ? [{ k: t('recognizer.model.accuracy'), v: `${+(modelConfig.accuracy <= 1 ? modelConfig.accuracy * 100 : modelConfig.accuracy).toFixed(1)}%` }]
                     : []),
@@ -1252,10 +1173,10 @@ export function RecognizerPage({ onBack }: RecognizerPageProps) {
             {/* Available signs */}
             <div className="panel">
               <div className="panel-head">
-                <div className="panel-h"><span className="num">{numClasses}</span>{t('recognizer.signs.title')}</div>
+                <div className="panel-h"><span className="num">{signLabels.length}</span>{t('recognizer.signs.title')}</div>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {labels.map((label) => {
+                {signLabels.map((label) => {
                   const active = currentPrediction === label;
                   return (
                     <span
